@@ -252,6 +252,8 @@ export function StudioApp() {
       setTransfer(null);
     }
   }
+
+  async function enhance() {
     if (!file) {
       return;
     }
