@@ -27,7 +27,7 @@ RUNPOD_API_KEY=...
 RUNPOD_ENDPOINT_ID=npjpz24ig6c47j
 ```
 
-`PUBLIC_BASE_URL` is optional once Blob is public: the GPU worker fetches the blob URL directly. Fluid Compute is on (`vercel.json`) so job processing can continue after the HTTP response via `after()`. Frankfurt (`fra1`) is preferred so we stay close to the EU-RO-1 GPU pod.
+`PUBLIC_BASE_URL` is optional once Blob is public: the GPU worker fetches the blob URL directly. Fluid Compute is on (`vercel.json`) so job processing can continue after the HTTP response via `after()`. Functions stay in **Europe** (`fra1`), matching the usual Vercel region for this setup.
 
 CPU fallback on Vercel uses bundled `ffmpeg-static` / `ffprobe-static`. Keep clips short for that path; long 4K interpolations belong on the GPU worker.
 

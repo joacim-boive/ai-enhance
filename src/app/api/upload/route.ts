@@ -1,12 +1,12 @@
 import { createWriteStream } from "node:fs";
 import { unlink } from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { NextResponse } from "next/server";
 import { ingestLocalVideo } from "@/lib/ingest";
 import { ACCEPTED_EXTENSIONS, MAX_UPLOAD_BYTES } from "@/lib/settings";
+import { tmpPath } from "@/lib/tmp";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -33,7 +33,7 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   const id = crypto.randomUUID();
-  const dest = path.join(os.tmpdir(), `${id}${ext || ".mp4"}`);
+  const dest = tmpPath(`${id}${ext || ".mp4"}`);
   const nodeStream = Readable.fromWeb(file.stream() as never);
   try {
     await pipeline(nodeStream, createWriteStream(dest));

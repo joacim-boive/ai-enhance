@@ -1,7 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import { extractThumbnails, probeVideo } from "./probe";
+import { tmpPath } from "./tmp";
 import {
   contentTypeForName,
   saveFromPath,
@@ -84,7 +84,7 @@ async function finalizeIngest(input: {
 }
 
 export async function writeTempFile(name: string, data: Buffer): Promise<string> {
-  const dest = path.join(os.tmpdir(), name);
+  const dest = tmpPath(name);
   await mkdir(path.dirname(dest), { recursive: true });
   await writeFile(dest, data);
   return dest;

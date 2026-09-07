@@ -1,10 +1,9 @@
 import { unlink } from "node:fs/promises";
-import os from "node:os";
-import path from "node:path";
 import { spawn } from "node:child_process";
 import { NextResponse } from "next/server";
 import { ffmpegBin } from "@/lib/binaries";
 import { ingestLocalVideo } from "@/lib/ingest";
+import { tmpPath } from "@/lib/tmp";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -30,7 +29,7 @@ function run(command: string, args: string[]): Promise<void> {
 
 export async function POST(): Promise<Response> {
   const id = crypto.randomUUID();
-  const dest = path.join(os.tmpdir(), `${id}-sample.mp4`);
+  const dest = tmpPath(`${id}-sample.mp4`);
   try {
     await run(ffmpegBin(), [
       "-y",

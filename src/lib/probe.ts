@@ -1,10 +1,10 @@
 import { spawn } from "node:child_process";
 import { mkdir, readFile, readdir } from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import { ffmpegBin, ffprobeBin } from "./binaries";
 import { parseFrameRate } from "./format";
 import { saveBytes } from "./storage";
+import { tmpPath } from "./tmp";
 import type { VideoMeta } from "./types";
 
 type FfprobeStream = {
@@ -90,7 +90,7 @@ export async function extractThumbnails(
   count = 8,
   durationSec = 3,
 ): Promise<string[]> {
-  const dir = path.join(os.tmpdir(), `thumbs-${jobId}`);
+  const dir = tmpPath(`thumbs-${jobId}`);
   await mkdir(dir, { recursive: true });
   const pattern = path.join(dir, "frame-%02d.jpg");
   const span = Math.max(durationSec, 1);

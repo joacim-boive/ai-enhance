@@ -19,7 +19,7 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-export const preferredRegion = "fra1";
+export const preferredRegion = "fra1"; // Europe — never US defaults
 
 export const metadata: Metadata = {
   title: "Lumen Enhance — studio-grade video restoration",

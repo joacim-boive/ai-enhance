@@ -1,10 +1,9 @@
 import { unlink } from "node:fs/promises";
-import os from "node:os";
-import path from "node:path";
 import { after } from "next/server";
 import { absoluteUrl, isVercel } from "./env";
 import { enhanceVideo } from "./ffmpeg";
 import { writeTempFile } from "./ingest";
+import { tmpPath } from "./tmp";
 import {
   appendEvent,
   clearAbortController,
@@ -276,7 +275,7 @@ async function runCpu(
     level: quality === "high" ? "info" : "warn",
   });
 
-  const dest = path.join(os.tmpdir(), `${id}-out.mp4`);
+  const dest = tmpPath(`${id}-out.mp4`);
   await enhanceVideo({
     inputPath: sourcePath,
     outputPath: dest,
