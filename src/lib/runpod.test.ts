@@ -13,11 +13,14 @@ test("runpodConfig reads RUNPOD_API_KEY at call time", () => {
   delete process.env.RUNPOD_API_KEY;
   delete process.env.RUNPOD_ENDPOINT_ID;
   assert.equal(runpodConfig().apiKey, null);
-  assert.equal(runpodConfig().endpointId, "npjpz24ig6c47j");
+  assert.equal(runpodConfig().endpointId, "tbsk82cmm6azwh");
+  process.env.RUNPOD_ENDPOINT_ID = "npjpz24ig6c47j";
+  assert.equal(runpodConfig().endpointId, "tbsk82cmm6azwh");
   assert.equal(isGpuConfigured(), false);
   if (previousKey) {
     process.env.RUNPOD_API_KEY = previousKey;
   }
+  delete process.env.RUNPOD_ENDPOINT_ID;
   if (previousEndpoint) {
     process.env.RUNPOD_ENDPOINT_ID = previousEndpoint;
   }

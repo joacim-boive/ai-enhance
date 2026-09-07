@@ -1,14 +1,19 @@
 import { missingGpuKeyMessage, runtimeEnv } from "./env";
 import type { HealthStatus } from "./types";
 
-const DEFAULT_ENDPOINT = "npjpz24ig6c47j";
+const DEFAULT_ENDPOINT = "tbsk82cmm6azwh";
+const STUCK_IMAGE_PULL_ENDPOINT = "npjpz24ig6c47j";
 
 export function runpodConfig(): {
   apiKey: string | null;
   endpointId: string;
 } {
   const apiKey = runtimeEnv("RUNPOD_API_KEY") ?? null;
-  const endpointId = runtimeEnv("RUNPOD_ENDPOINT_ID") ?? DEFAULT_ENDPOINT;
+  const configuredEndpoint = runtimeEnv("RUNPOD_ENDPOINT_ID");
+  const endpointId =
+    !configuredEndpoint || configuredEndpoint === STUCK_IMAGE_PULL_ENDPOINT
+      ? DEFAULT_ENDPOINT
+      : configuredEndpoint;
   return { apiKey, endpointId };
 }
 
@@ -71,15 +76,22 @@ export async function gpuHealth(): Promise<HealthStatus["gpu"]> {
       initializing: data.workers?.initializing ?? 0,
       throttled: data.workers?.throttled ?? 0,
     };
-    const ready = workers.idle + workers.running + workers.initializing > 0;
+    const ready = workers.idle + workers.running > 0;
+    let message = "GPU is cold. The first job warms a worker, then runs SeedVR2 + RIFE.";
+    if (ready) {
+      message = "GPU workers are available.";
+    } else if (workers.initializing > 0) {
+      message =
+        "GPU worker is starting. The Hub image is pulling onto an RTX 4090 — first boot can take several minutes.";
+    } else if (workers.throttled > 0) {
+      message = "GPU capacity is throttled. Jobs will wait or fall back to CPU.";
+    }
     return {
       configured: true,
       endpointId,
       ready,
       workers,
-      message: ready
-        ? "GPU workers are available."
-        : "GPU is cold. The first job warms a worker (~1–2 min), then runs SeedVR2 + RIFE.",
+      message,
     };
   } catch {
     return {
@@ -164,6 +176,7 @@ export async function pollGpuJob(
   if (!runpodConfig().apiKey) {
     throw new Error("GPU is not configured");
   }
+  const started = Date.now();
   while (!signal.aborted) {
     const data = await getGpuJobStatus(jobId);
     if (data.status === "COMPLETED") {
@@ -175,6 +188,14 @@ export async function pollGpuJob(
       data.status === "TIMED_OUT"
     ) {
       throw new Error(data.error || `GPU job ${data.status.toLowerCase()}`);
+    }
+    if (
+      (data.status === "IN_QUEUE" || !data.status) &&
+      Date.now() - started > GPU_QUEUE_TIMEOUT_MS
+    ) {
+      throw new Error(
+        "GPU worker stayed queued while pulling the image. Falling back to CPU.",
+      );
     }
     await sleep(2000, signal);
   }
@@ -265,3 +286,4 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
 }
 
 export const GPU_BASE64_LIMIT = 8 * 1024 * 1024;
+export const GPU_QUEUE_TIMEOUT_MS = 6 * 60 * 1000;

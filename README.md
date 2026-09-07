@@ -10,7 +10,7 @@ Production host: [ai-enhance-ruby.vercel.app](https://ai-enhance-ruby.vercel.app
 - Presets: Restore (2×), Cinema 4K, High Frame Rate (60 fps), Max (4K + 60)
 - Custom scale, target fps, denoise, and sharpen
 - Live job timeline, ETA, toasts, and a before/after split when the master is ready
-- **GPU path**: Runpod serverless worker (`SeedVR2` + `RIFE 4.9`) — endpoint `ai-enhance-video`
+- **GPU path**: Runpod serverless worker (`SeedVR2` + `RIFE 4.9`) — endpoint `ai-enhance-video-ada24`
 - **Fallback path**: high-quality CPU encode (Lanczos + motion-compensated interpolation), then a faster blend interpolator if that fails
 - Cancel and retry without leaving the bench
 
@@ -24,7 +24,7 @@ Also set in the Vercel project for **Production and Preview** (both checkboxes),
 
 ```
 RUNPOD_API_KEY=...
-RUNPOD_ENDPOINT_ID=npjpz24ig6c47j
+RUNPOD_ENDPOINT_ID=tbsk82cmm6azwh
 ```
 
 The header shows **GPU unset** when that deployment’s function cannot read `RUNPOD_API_KEY`. Blob store variables are injected into every environment automatically; a manual Runpod key is not. Adding it only to Production leaves Preview unset. After changing env vars, Vercel does not patch a live deployment — create a new one.
@@ -45,11 +45,11 @@ Open [http://localhost:3000](http://localhost:3000). FFmpeg must be on `PATH` or
 
 ### GPU (optional)
 
-The GPU worker is already deployed on Runpod as `ai-enhance-video`. To use it from this app:
+The GPU worker is already deployed on Runpod as `ai-enhance-video-ada24` (RTX 4090 / ADA_24). To use it from this app:
 
 ```
 RUNPOD_API_KEY=...
-RUNPOD_ENDPOINT_ID=npjpz24ig6c47j
+RUNPOD_ENDPOINT_ID=tbsk82cmm6azwh
 PUBLIC_BASE_URL=https://your-public-host
 ```
 
