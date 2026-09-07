@@ -189,7 +189,7 @@ async function runGpu(
   });
   await appendEvent(job.id, {
     stage: "Warming GPU",
-    message: "Submitting to the SeedVR2 / RIFE worker. Cold start can take a minute.",
+    message: "Submitting to the SeedVR2 / RIFE worker on RTX 4090. First boot can take a few minutes.",
     progress: 8,
     level: "info",
   });
@@ -244,6 +244,9 @@ async function runGpu(
     const tmp = await writeTempFile(`${job.id}-gpu.mp4`, payload);
     await persistOutput(job.id, tmp, job.name);
     return "gpu";
+  } catch (error) {
+    void cancelGpuJob(runpodJobId);
+    throw error;
   } finally {
     clearInterval(pulse);
   }
