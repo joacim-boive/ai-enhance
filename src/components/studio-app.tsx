@@ -26,6 +26,7 @@ export function StudioApp() {
   const [settings, setSettings] = useState<JobSettings>(DEFAULT_SETTINGS);
   const [job, setJob] = useState<PublicJob | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [starting, setStarting] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const sourceRef = useRef<PublicJob["status"] | null>(null);
 
@@ -198,6 +199,7 @@ export function StudioApp() {
       return;
     }
     try {
+      setStarting(true);
       const latest = health ?? (await fetchHealth());
       if (latest?.hosting === "vercel" && !latest.blob?.configured) {
         throw new Error(
@@ -232,6 +234,8 @@ export function StudioApp() {
         title: "Could not start",
         body: error instanceof Error ? error.message : "Try again.",
       });
+    } finally {
+      setStarting(false);
     }
   }
 
@@ -253,8 +257,9 @@ export function StudioApp() {
     }
   }
 
-  const busy =
+  const working =
     uploading ||
+    starting ||
     job?.status === "queued" ||
     job?.status === "probing" ||
     job?.status === "warming" ||
@@ -281,7 +286,8 @@ export function StudioApp() {
         <EnhancePanel
           settings={settings}
           meta={file?.meta ?? null}
-          busy={Boolean(busy) || !file}
+          working={working}
+          canEnhance={Boolean(file) && !working}
           onChange={setSettings}
           onEnhance={() => void enhance()}
         />

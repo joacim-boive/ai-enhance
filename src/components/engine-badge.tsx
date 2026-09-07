@@ -18,8 +18,9 @@ export function EngineBadge({ health }: Props) {
       ? "text-[var(--teal)]"
       : "text-[var(--gold)]"
     : "text-[var(--muted)]";
+  const gpuTitle = gpu.message;
   const gpuLabel = !gpu.configured
-    ? "GPU offline"
+    ? "GPU unset"
     : gpu.ready
       ? "GPU ready"
       : "GPU cold";
@@ -27,13 +28,18 @@ export function EngineBadge({ health }: Props) {
   const blobLabel = health.blob?.configured
     ? "Blob ready"
     : health.hosting === "vercel"
-      ? "Blob missing"
+      ? "Blob unset"
       : "Local disk";
   const blobTone = health.blob?.configured
     ? "text-[var(--teal)]"
     : health.hosting === "vercel"
-      ? "text-[var(--err)]"
+      ? "text-[var(--gold)]"
       : "text-[var(--muted)]";
+  const blobTitle = health.blob?.configured
+    ? "Vercel Blob is connected."
+    : health.hosting === "vercel"
+      ? "Connect a Blob store on this Vercel project so uploads and jobs persist."
+      : "Saving clips on this machine.";
 
   return (
     <div className="flex items-center gap-2 rounded-full border border-[var(--line)] bg-black/30 px-3 py-2 font-mono text-[11px] uppercase tracking-[0.16em]">
@@ -41,11 +47,13 @@ export function EngineBadge({ health }: Props) {
         {cpuLabel}
       </span>
       <span className="text-[var(--line-strong)]">·</span>
-      <span className={gpuTone} title={gpu.message}>
+      <span className={gpuTone} title={gpuTitle}>
         {gpuLabel}
       </span>
       <span className="text-[var(--line-strong)]">·</span>
-      <span className={blobTone}>{blobLabel}</span>
+      <span className={blobTone} title={blobTitle}>
+        {blobLabel}
+      </span>
     </div>
   );
 }

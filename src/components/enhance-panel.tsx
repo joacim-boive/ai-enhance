@@ -14,12 +14,20 @@ import type { EnginePreference, JobSettings, VideoMeta } from "@/lib/types";
 type Props = {
   settings: JobSettings;
   meta: VideoMeta | null;
-  busy: boolean;
+  working: boolean;
+  canEnhance: boolean;
   onChange: (settings: JobSettings) => void;
   onEnhance: () => void;
 };
 
-export function EnhancePanel({ settings, meta, busy, onChange, onEnhance }: Props) {
+export function EnhancePanel({
+  settings,
+  meta,
+  working,
+  canEnhance,
+  onChange,
+  onEnhance,
+}: Props) {
   const target = meta ? resolveOutputTarget(meta, settings) : null;
   const engines: { id: EnginePreference; label: string }[] = [
     { id: "auto", label: "Auto" },
@@ -93,7 +101,7 @@ export function EnhancePanel({ settings, meta, busy, onChange, onEnhance }: Prop
         />
       </div>
 
-      <div className="mt-5">
+      <div className="mt-6">
         <p className="text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Engine</p>
         <div className="mt-2 flex flex-wrap gap-2">
           {engines.map((engine) => (
@@ -107,25 +115,27 @@ export function EnhancePanel({ settings, meta, busy, onChange, onEnhance }: Prop
         </div>
       </div>
 
-      {target && meta ? (
-        <div className="mt-6 rounded-2xl border border-[var(--line)] bg-black/25 px-4 py-3 font-mono text-[11px] uppercase tracking-[0.14em] text-[var(--muted)]">
-          {formatResolution(meta.width, meta.height)} {formatFps(meta.fps)}
-          <span className="mx-2 text-[var(--gold)]">→</span>
-          {formatResolution(target.width, target.height)} {formatFps(target.fps)}
-        </div>
-      ) : null}
+      <div className="mt-8 flex flex-col gap-4">
+        {target && meta ? (
+          <div className="rounded-2xl border border-[var(--line)] bg-black/25 px-4 py-3 font-mono text-[11px] uppercase tracking-[0.14em] text-[var(--muted)]">
+            {formatResolution(meta.width, meta.height)} {formatFps(meta.fps)}
+            <span className="mx-2 text-[var(--gold)]">→</span>
+            {formatResolution(target.width, target.height)} {formatFps(target.fps)}
+          </div>
+        ) : null}
 
-      <button
-        type="button"
-        disabled={!meta || busy}
-        onClick={onEnhance}
-        className="mt-auto w-full rounded-full bg-[linear-gradient(180deg,#f3d7a8,#c48a42)] px-5 py-4 text-sm uppercase tracking-[0.22em] text-[#2a1c0a] disabled:opacity-40"
-      >
-        {busy ? "Working…" : "Enhance video"}
-      </button>
-      <p className="mt-3 text-center text-[11px] text-[var(--muted)]">
-        GPU uses SeedVR2 + RIFE 4.9. If it cannot start, we fall back automatically.
-      </p>
+        <button
+          type="button"
+          disabled={!canEnhance || working}
+          onClick={onEnhance}
+          className="w-full rounded-full bg-[linear-gradient(180deg,#f3d7a8,#c48a42)] px-5 py-4 text-sm uppercase tracking-[0.22em] text-[#2a1c0a] disabled:opacity-40"
+        >
+          {working ? "Working…" : "Enhance video"}
+        </button>
+        <p className="text-center text-[11px] text-[var(--muted)]">
+          GPU uses SeedVR2 + RIFE 4.9. If it cannot start, we fall back automatically.
+        </p>
+      </div>
     </aside>
   );
 }
