@@ -40,8 +40,8 @@ export function DropZone({ disabled, onFile, onSample }: Props) {
       <div className="pointer-events-none absolute inset-6 rounded-[22px] border border-dashed border-[var(--line-strong)]" />
       <p className="font-serif text-4xl tracking-tight md:text-5xl">Drop a clip</p>
       <p className="mt-3 max-w-md text-sm text-[var(--muted)]">
-        MP4, MOV, WebM, or MKV. We’ll read the cadence, resolve a target, and
-        keep you on the timeline the whole way through.
+        MP4, MOV, WebM, or MKV — including multi-gigabyte masters. Uploads go
+        straight to private storage; this app never holds the file.
       </p>
       <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
         <label className="cursor-pointer rounded-full bg-[var(--ink)] px-5 py-3 text-xs uppercase tracking-[0.2em] text-[var(--bg)]">

@@ -2,7 +2,7 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   agentRules: false,
-  serverExternalPackages: ["ffmpeg-static", "ffprobe-static"],
+  serverExternalPackages: ["ffmpeg-static", "ffprobe-static", "@aws-sdk/client-s3", "@aws-sdk/lib-storage", "@aws-sdk/s3-request-presigner"],
   outputFileTracingIncludes: {
     "/api/**/*": [
       "./node_modules/ffmpeg-static/ffmpeg",

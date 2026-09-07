@@ -26,7 +26,7 @@ export function LibraryView() {
     <section className="rise">
       <h1 className="font-serif text-4xl tracking-tight">Library</h1>
       <p className="mt-2 text-sm text-[var(--muted)]">
-        Finished masters from this studio. On Vercel they live in Blob storage.
+        Finished masters from this session. Files live in private R2 — guessing a key is not enough.
       </p>
       {error ? <p className="mt-6 text-[var(--err)]">{error}</p> : null}
       {jobs.length === 0 && !error ? (

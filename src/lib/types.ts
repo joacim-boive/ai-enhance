@@ -52,14 +52,20 @@ export type JobEvent = {
 
 export type Job = {
   id: string;
+  userId: string;
   name: string;
   status: JobStatus;
   engine: Engine | null;
   settings: JobSettings;
   sourcePath: string;
   sourceUrl: string;
+  sourceObjectKey: string | null;
   outputPath: string | null;
   outputUrl: string | null;
+  outputObjectKey: string | null;
+  outputBytes: number | null;
+  outputEtag: string | null;
+  outputMultipartUploadId: string | null;
   sourceMeta: VideoMeta | null;
   outputMeta: VideoMeta | null;
   thumbs: string[];
@@ -76,13 +82,23 @@ export type Job = {
   startedAt: number | null;
 };
 
-export type PublicJob = Omit<Job, "sourcePath" | "outputPath">;
+export type PublicJob = Omit<
+  Job,
+  | "sourcePath"
+  | "outputPath"
+  | "sourceObjectKey"
+  | "outputObjectKey"
+  | "outputEtag"
+  | "outputMultipartUploadId"
+>;
 
 export type HostEnvironment = "production" | "preview" | "development" | "local";
 
 export type HealthStatus = {
   ffmpeg: { ok: boolean; version: string | null };
   blob: { configured: boolean };
+  r2: { configured: boolean };
+  session: { configured: boolean };
   hosting: "vercel" | "local";
   environment: HostEnvironment;
   gpu: {

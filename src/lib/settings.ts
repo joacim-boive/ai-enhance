@@ -231,4 +231,5 @@ export const ACCEPTED_VIDEO_TYPES = [
 
 export const ACCEPTED_EXTENSIONS = [".mp4", ".mov", ".webm", ".mkv", ".avi", ".m4v"];
 
-export const MAX_UPLOAD_BYTES = 512 * 1024 * 1024;
+export const MAX_UPLOAD_BYTES = 20 * 1024 * 1024 * 1024;
+export const MAX_FORM_UPLOAD_BYTES = 80 * 1024 * 1024;

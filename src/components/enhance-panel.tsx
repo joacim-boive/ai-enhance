@@ -110,14 +110,25 @@ export function EnhancePanel({
             <Chip
               key={engine.id}
               active={settings.enginePreference === engine.id}
-              disabled={engine.id === "gpu" && health !== null && !health.gpu.configured}
+              disabled={engine.id === "gpu" && health !== null && (!health.gpu.configured || !health.r2?.configured)}
               label={engine.label}
+              title={
+                engine.id === "gpu" && health !== null && !health.r2?.configured
+                  ? "Cloudflare R2 is required before GPU can store a private master."
+                  : engine.id === "gpu" && health !== null && !health.gpu.configured
+                    ? "GPU key is not configured on this deployment."
+                    : undefined
+              }
               onClick={() => onChange({ ...settings, enginePreference: engine.id })}
             />
           ))}
         </div>
         {health && !health.gpu.configured ? (
           <p className="mt-3 text-[11px] leading-5 text-[var(--gold)]">{health.gpu.message}</p>
+        ) : health && !health.r2?.configured ? (
+          <p className="mt-3 text-[11px] leading-5 text-[var(--gold)]">
+            GPU needs private R2 so the worker can upload the master without sending bytes through Vercel.
+          </p>
         ) : null}
       </div>
 
@@ -151,17 +162,19 @@ function Chip({
   label,
   onClick,
   disabled = false,
+  title,
 }: {
   active: boolean;
   label: string;
   onClick: () => void;
   disabled?: boolean;
+  title?: string;
 }) {
   return (
     <button
       type="button"
       disabled={disabled}
-      title={disabled ? "GPU key is not configured on this deployment." : undefined}
+      title={title}
       onClick={onClick}
       className={`rounded-full px-3 py-1.5 text-xs uppercase tracking-[0.14em] ${
         disabled

@@ -1,9 +1,7 @@
 import { unlink } from "node:fs/promises";
 import { after } from "next/server";
-import { absoluteUrl, isVercel } from "./env";
+import { absoluteUrl, isVercel, r2Enabled } from "./env";
 import { enhanceVideo } from "./ffmpeg";
-import { writeTempFile } from "./ingest";
-import { tmpPath } from "./tmp";
 import {
   appendEvent,
   clearAbortController,
@@ -11,18 +9,30 @@ import {
   loadJob,
   patchJob,
 } from "./jobs";
+import { jobOutputKey, mediaJobUrl } from "./keys";
 import { extractThumbnails, probeVideo } from "./probe";
+import {
+  abortMultipartUpload,
+  completeMultipartUpload,
+  createOutputUploadGrant,
+  GPU_URL_EXPIRES_SEC,
+  headObject,
+  presignGetUrl,
+  uploadFileToR2,
+} from "./r2";
 import {
   cancelGpuJob,
   getGpuJobStatus,
-  GPU_BASE64_LIMIT,
+  gpuOutputLooksLikeBytes,
   isGpuConfigured,
-  materializeGpuOutput,
+  parseGpuObjectOutput,
   pollGpuJob,
   submitGpuJob,
 } from "./runpod";
 import { isNoOp, preferGpuEngine, resolveOutputTarget } from "./settings";
+import { SAMPLE_PUBLIC_PATH, SAMPLE_SOURCE_PATH } from "./sample";
 import { contentTypeForName, localPathFor, saveFromPath } from "./storage";
+import { tmpPath } from "./tmp";
 import type { Engine, Job } from "./types";
 import { isHttpUrl } from "./url";
 
@@ -69,12 +79,22 @@ async function drain(): Promise<void> {
   draining = false;
 }
 
-function sourceInput(job: Job): string {
+async function sourceInput(job: Job): Promise<string> {
+  if (job.sourceObjectKey && r2Enabled()) {
+    return presignGetUrl(job.sourceObjectKey, { expiresIn: GPU_URL_EXPIRES_SEC });
+  }
   if (isHttpUrl(job.sourceUrl)) {
     return job.sourceUrl;
   }
   if (job.sourcePath.startsWith("/") && !job.sourcePath.startsWith("/api/")) {
     return job.sourcePath;
+  }
+  if (job.sourceUrl.startsWith("/") && !job.sourceUrl.startsWith("/api/")) {
+    const absolute = absoluteUrl(job.sourceUrl);
+    if (isHttpUrl(absolute)) {
+      return absolute;
+    }
+    return job.sourceUrl;
   }
   return localPathFor(job.sourcePath);
 }
@@ -98,9 +118,12 @@ async function processJob(id: string): Promise<void> {
     level: "info",
   });
 
-  const input = sourceInput(job);
+  const input = await sourceInput(job);
   const meta = await probeVideo(input);
-  const thumbs = await extractThumbnails(input, id, 8, meta.durationSec);
+  const thumbs = await extractThumbnails(input, id, 8, meta.durationSec, {
+    userId: job.userId,
+    kind: "job",
+  });
   await patchJob(id, { sourceMeta: meta, thumbs });
 
   if (isNoOp(meta, job.settings)) {
@@ -113,7 +136,7 @@ async function processJob(id: string): Promise<void> {
   const target = resolveOutputTarget(meta, job.settings);
   const preferGpu = preferGpuEngine({
     enginePreference: job.settings.enginePreference,
-    gpuConfigured: isGpuConfigured(),
+    gpuConfigured: isGpuConfigured() && r2Enabled(),
     scaleChanged: target.scaleChanged,
     fpsChanged: target.fpsChanged,
   });
@@ -145,11 +168,13 @@ async function processJob(id: string): Promise<void> {
       usedEngine = "cpu";
     }
   } else {
-    if (job.settings.enginePreference === "gpu" && !isGpuConfigured()) {
-      fallbackReason = "GPU is not configured on this server.";
+    if (job.settings.enginePreference === "gpu" && (!isGpuConfigured() || !r2Enabled())) {
+      fallbackReason = !r2Enabled()
+        ? "Cloudflare R2 is not configured, so GPU cannot store a private master."
+        : "GPU is not configured on this server.";
       await appendEvent(id, {
         stage: "Fallback",
-        message: "GPU key is missing on this deployment. Processing on CPU with Lanczos + motion interpolation.",
+        message: fallbackReason,
         progress: 8,
         level: "warn",
       });
@@ -181,6 +206,10 @@ async function runGpu(
   signal: AbortSignal,
   target: { scaleChanged: boolean; fpsChanged: boolean },
 ): Promise<Engine> {
+  if (!r2Enabled()) {
+    throw new Error("Cloudflare R2 is required so the GPU worker can upload a private master.");
+  }
+
   await patchJob(job.id, {
     status: "warming",
     engine: "gpu",
@@ -189,40 +218,35 @@ async function runGpu(
   });
   await appendEvent(job.id, {
     stage: "Warming GPU",
-    message: "Submitting to the SeedVR2 / RIFE worker. Cold start can take a minute.",
+    message: "Submitting to the SeedVR2 / RIFE worker on RTX 4090. First boot can take a few minutes.",
     progress: 8,
     level: "info",
   });
 
-  const publicSource = isHttpUrl(job.sourceUrl)
-    ? job.sourceUrl
-    : absoluteUrl(job.sourceUrl);
-  const sourceSize = job.sourceMeta?.sizeBytes ?? 0;
-  let videoUrl: string | undefined;
-  let videoBase64: string | undefined;
+  const objectKey = jobOutputKey(job.userId, job.id);
+  const grant = await createOutputUploadGrant({
+    objectKey,
+    contentType: "video/mp4",
+  });
+  await patchJob(job.id, {
+    outputObjectKey: objectKey,
+    outputMultipartUploadId: grant.multipart.uploadId,
+  });
 
-  if (isHttpUrl(publicSource)) {
-    videoUrl = publicSource;
-  } else if (sourceSize > 0 && sourceSize <= GPU_BASE64_LIMIT) {
-    const { readFile } = await import("node:fs/promises");
-    const buf = await readFile(sourceInput(job));
-    videoBase64 = `data:video/mp4;base64,${buf.toString("base64")}`;
-  } else {
-    throw new Error(
-      "Clip is too large for inline GPU upload. Connect Vercel Blob or set PUBLIC_BASE_URL.",
-    );
-  }
-
+  const videoUrl = await gpuSourceUrl(job);
   const runpodJobId = await submitGpuJob({
     videoUrl,
-    videoBase64,
+    uploadUrl: grant.putUrl,
+    objectKey,
+    contentType: "video/mp4",
+    multipart: grant.multipart,
     scaleChanged: target.scaleChanged,
     fpsChanged: target.fpsChanged,
   });
   await patchJob(job.id, { runpodJobId, status: "processing", stage: "Enhancing on GPU" });
   await appendEvent(job.id, {
     stage: "Enhancing on GPU",
-    message: "Worker is upscaling and interpolating frames.",
+    message: "Worker streams the master to private R2. This app never downloads the file.",
     progress: 18,
     level: "info",
   });
@@ -240,13 +264,74 @@ async function runGpu(
     signal.addEventListener("abort", onAbort, { once: true });
     const output = await pollGpuJob(runpodJobId, signal);
     signal.removeEventListener("abort", onAbort);
-    const payload = await materializeGpuOutput(output);
-    const tmp = await writeTempFile(`${job.id}-gpu.mp4`, payload);
-    await persistOutput(job.id, tmp, job.name);
+    await persistGpuObject(job, output);
     return "gpu";
+  } catch (error) {
+    void cancelGpuJob(runpodJobId);
+    throw error;
   } finally {
     clearInterval(pulse);
   }
+}
+
+async function gpuSourceUrl(job: Job): Promise<string> {
+  if (job.sourceObjectKey && r2Enabled()) {
+    return presignGetUrl(job.sourceObjectKey, { expiresIn: GPU_URL_EXPIRES_SEC });
+  }
+  if (job.sourcePath === SAMPLE_SOURCE_PATH || job.sourcePath.startsWith("public/")) {
+    const publicPath =
+      job.sourcePath === SAMPLE_SOURCE_PATH
+        ? SAMPLE_PUBLIC_PATH
+        : `/${job.sourcePath.replace(/^public\//, "")}`;
+    const absolute = absoluteUrl(publicPath);
+    if (isHttpUrl(absolute)) {
+      return absolute;
+    }
+  }
+  if (isHttpUrl(job.sourceUrl) && !job.sourceUrl.includes("/api/media/")) {
+    return job.sourceUrl;
+  }
+  throw new Error("GPU jobs need a reachable source URL. Upload to R2 or use the public sample.");
+}
+
+async function persistGpuObject(job: Job, output: unknown): Promise<void> {
+  const current = (await loadJob(job.id)) ?? job;
+  const expected = jobOutputKey(current.userId, current.id);
+  const parsed = parseGpuObjectOutput(output);
+  if (!parsed) {
+    if (gpuOutputLooksLikeBytes(output)) {
+      throw new Error(
+        "GPU returned inline bytes. Deploy the R2 wrap so the worker streams the mp4 to storage instead of sending it through Vercel.",
+      );
+    }
+    throw new Error(
+      "GPU finished without an object key. Deploy the R2 wrap handler so the worker uploads to the presigned URL.",
+    );
+  }
+  if (parsed.objectKey !== expected) {
+    throw new Error("GPU output key does not belong to this job.");
+  }
+  if (parsed.parts && parsed.uploadId) {
+    await completeMultipartUpload({
+      objectKey: expected,
+      uploadId: parsed.uploadId,
+      parts: parsed.parts,
+    });
+  } else if (current.outputMultipartUploadId) {
+    await abortMultipartUpload(expected, current.outputMultipartUploadId).catch(() => undefined);
+  }
+  const head = await headObject(expected);
+  if (!head || !head.contentLength) {
+    throw new Error("Master is not in private storage yet.");
+  }
+  await patchJob(job.id, {
+    outputPath: expected,
+    outputObjectKey: expected,
+    outputUrl: mediaJobUrl(job.id, "output"),
+    outputBytes: head.contentLength,
+    outputEtag: head.etag ?? parsed.etag,
+    outputMultipartUploadId: null,
+  });
 }
 
 async function runCpu(
@@ -297,6 +382,28 @@ async function runCpu(
 }
 
 async function persistOutput(id: string, localPath: string, name: string): Promise<string> {
+  const job = await loadJob(id);
+  if (!job) {
+    throw new Error("Job missing while saving output");
+  }
+  if (r2Enabled()) {
+    const objectKey = jobOutputKey(job.userId, job.id);
+    const head = await uploadFileToR2({
+      objectKey,
+      filePath: localPath,
+      contentType: "video/mp4",
+    });
+    await unlink(localPath).catch(() => undefined);
+    const url = mediaJobUrl(id, "output");
+    await patchJob(id, {
+      outputPath: objectKey,
+      outputObjectKey: objectKey,
+      outputUrl: url,
+      outputBytes: head.contentLength,
+      outputEtag: head.etag,
+    });
+    return url;
+  }
   const url = await saveFromPath(`outputs/${id}.mp4`, localPath, contentTypeForName(name));
   await unlink(localPath).catch(() => undefined);
   await patchJob(id, {
@@ -327,11 +434,23 @@ async function completeJob(
   }
   let outputUrl = current.outputUrl;
   let outputPath = current.outputPath;
+  let outputObjectKey = current.outputObjectKey;
   let outputMeta = current.outputMeta;
+  let outputBytes = current.outputBytes;
   if (options?.reuseSource) {
-    outputUrl = current.sourceUrl;
+    outputUrl = mediaJobUrl(id, "source");
     outputPath = current.sourcePath;
+    outputObjectKey = current.sourceObjectKey;
     outputMeta = current.sourceMeta;
+    outputBytes = current.sourceMeta?.sizeBytes ?? current.outputBytes;
+  } else if (outputObjectKey && r2Enabled()) {
+    try {
+      outputMeta = await probeVideo(
+        await presignGetUrl(outputObjectKey, { expiresIn: 3600 }),
+      );
+    } catch {
+      outputMeta = outputMeta ?? null;
+    }
   } else if (outputPath) {
     try {
       outputMeta = await probeVideo(
@@ -349,7 +468,9 @@ async function completeJob(
     etaSec: 0,
     outputPath,
     outputUrl,
+    outputObjectKey,
     outputMeta,
+    outputBytes,
     completedAt: Date.now(),
     fallbackReason,
     error: null,
@@ -401,9 +522,7 @@ export async function resumeGpuJob(id: string): Promise<void> {
     if (status.status !== "COMPLETED") {
       return;
     }
-    const payload = await materializeGpuOutput(status.output);
-    const tmp = await writeTempFile(`${job.id}-gpu.mp4`, payload);
-    await persistOutput(job.id, tmp, job.name);
+    await persistGpuObject(job, status.output);
     await completeJob(id, "gpu", null, null);
   } catch (error) {
     console.error(`GPU resume failed for ${id}`, error);

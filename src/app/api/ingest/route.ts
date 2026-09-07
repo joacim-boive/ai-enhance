@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
-import { ingestRemoteVideo } from "@/lib/ingest";
+import { requireSession } from "@/lib/authz";
+import { ingestR2Video } from "@/lib/ingest";
+import { ownsObjectKey } from "@/lib/keys";
+import { missingR2Message, r2Enabled } from "@/lib/env";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -8,24 +11,34 @@ export const maxDuration = 120;
 type IngestBody = {
   id?: string;
   name?: string;
-  url?: string;
-  pathname?: string;
+  objectKey?: string;
+  uploadId?: string;
+  parts?: { partNumber: number; etag: string }[];
 };
 
 export async function POST(request: Request): Promise<Response> {
+  if (!r2Enabled()) {
+    return NextResponse.json({ error: missingR2Message() }, { status: 503 });
+  }
+  const session = await requireSession();
   const body = (await request.json()) as IngestBody;
-  if (!body.id || !body.name || !body.url || !body.pathname) {
+  if (!body.id || !body.name || !body.objectKey) {
     return NextResponse.json({ error: "Missing upload metadata" }, { status: 400 });
   }
-  if (!body.pathname.startsWith("uploads/")) {
-    return NextResponse.json({ error: "Invalid upload path" }, { status: 400 });
+  if (!ownsObjectKey(session.userId, body.objectKey)) {
+    return NextResponse.json({ error: "Invalid upload path" }, { status: 403 });
+  }
+  if (!body.objectKey.includes(`/uploads/${body.id}`)) {
+    return NextResponse.json({ error: "Upload id does not match the object key" }, { status: 400 });
   }
   try {
-    const ingested = await ingestRemoteVideo({
+    const ingested = await ingestR2Video({
       id: body.id,
       name: body.name,
-      url: body.url,
-      pathname: body.pathname,
+      userId: session.userId,
+      objectKey: body.objectKey,
+      uploadId: body.uploadId,
+      parts: body.parts,
     });
     return NextResponse.json(ingested);
   } catch (error) {

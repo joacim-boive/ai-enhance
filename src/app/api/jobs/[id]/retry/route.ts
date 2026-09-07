@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { requireOwnedJob } from "@/lib/authz";
 import { appendEvent, loadJob, patchJob, toPublicJob } from "@/lib/jobs";
 import { startJob } from "@/lib/processor";
 
@@ -15,7 +16,7 @@ export async function POST(
   context: RouteContext,
 ): Promise<Response> {
   const { id } = await context.params;
-  const job = await loadJob(id);
+  const job = await requireOwnedJob(id);
   if (!job) {
     return NextResponse.json({ error: "Job not found" }, { status: 404 });
   }
@@ -29,6 +30,10 @@ export async function POST(
     runpodJobId: null,
     outputPath: null,
     outputUrl: null,
+    outputObjectKey: null,
+    outputBytes: null,
+    outputEtag: null,
+    outputMultipartUploadId: null,
     outputMeta: null,
     completedAt: null,
     startedAt: null,

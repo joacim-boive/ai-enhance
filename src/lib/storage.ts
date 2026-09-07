@@ -2,8 +2,10 @@ import { createReadStream } from "node:fs";
 import { copyFile, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { get, list, put } from "@vercel/blob";
-import { blobEnabled } from "./env";
+import { blobEnabled, r2Enabled } from "./env";
+import { uploadRecordKey } from "./keys";
 import { DATA_DIR, ensureDirs } from "./paths";
+import { getJsonObject, putJsonObject } from "./r2";
 import { SAMPLE_FILE_ID, SAMPLE_STORED_FILE } from "./sample";
 
 export type StoredFile = {
@@ -11,6 +13,8 @@ export type StoredFile = {
   name: string;
   url: string;
   pathname: string;
+  userId?: string;
+  objectKey?: string;
 };
 
 function localFile(pathname: string): string {
@@ -19,7 +23,7 @@ function localFile(pathname: string): string {
 
 export function localPathFor(pathname: string): string {
   if (pathname.startsWith("public/")) {
-    return path.join(process.cwd(), pathname);
+    return path.join(/* turbopackIgnore: true */ process.cwd(), pathname);
   }
   return localFile(pathname);
 }
@@ -150,12 +154,29 @@ export async function listPathnames(prefix: string): Promise<string[]> {
 }
 
 export async function saveStoredFile(record: StoredFile): Promise<void> {
+  if (r2Enabled() && record.userId) {
+    await putJsonObject(uploadRecordKey(record.userId, record.id), record);
+    return;
+  }
   await saveJson(`files/${record.id}.json`, record);
 }
 
-export async function loadStoredFile(id: string): Promise<StoredFile | null> {
+export async function loadStoredFile(
+  id: string,
+  userId?: string,
+): Promise<StoredFile | null> {
   if (id === SAMPLE_FILE_ID) {
     return SAMPLE_STORED_FILE;
   }
-  return readJson<StoredFile>(`files/${id}.json`);
+  if (userId && r2Enabled()) {
+    const remote = await getJsonObject<StoredFile>(uploadRecordKey(userId, id));
+    if (remote) {
+      return remote;
+    }
+  }
+  const local = await readJson<StoredFile>(`files/${id}.json`);
+  if (local?.userId && userId && local.userId !== userId) {
+    return null;
+  }
+  return local;
 }

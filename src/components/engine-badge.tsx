@@ -57,20 +57,21 @@ export function EngineBadge({ health }: Props) {
       ? "GPU ready"
       : "GPU cold";
   const cpuLabel = resolved.ffmpeg.ok ? "CPU ready" : "CPU missing";
-  const blobLabel = resolved.blob?.configured
-    ? "Blob ready"
+  const r2Ready = Boolean(resolved.r2?.configured && resolved.session?.configured);
+  const storageLabel = r2Ready
+    ? "R2 ready"
     : resolved.hosting === "vercel"
-      ? "Blob unset"
+      ? "R2 unset"
       : "Local disk";
-  const blobTone = resolved.blob?.configured
+  const storageTone = r2Ready
     ? "text-[var(--teal)]"
     : resolved.hosting === "vercel"
       ? "text-[var(--gold)]"
       : "text-[var(--muted)]";
-  const blobTitle = resolved.blob?.configured
-    ? "Vercel Blob is connected."
+  const storageTitle = r2Ready
+    ? "Private Cloudflare R2 is connected. Masters stay scoped to this session."
     : resolved.hosting === "vercel"
-      ? "Connect a Blob store on this Vercel project so uploads and jobs persist."
+      ? "Add R2 credentials and SESSION_SECRET so GB masters never pass through Vercel."
       : "Saving clips on this machine.";
 
   return (
@@ -83,8 +84,8 @@ export function EngineBadge({ health }: Props) {
         {gpuLabel}
       </span>
       <span className="text-[var(--line-strong)]">·</span>
-      <span className={blobTone} title={blobTitle}>
-        {blobLabel}
+      <span className={storageTone} title={storageTitle}>
+        {storageLabel}
       </span>
     </div>
   );

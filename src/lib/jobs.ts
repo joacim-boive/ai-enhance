@@ -1,4 +1,12 @@
 import { EventEmitter } from "node:events";
+import {
+  jobPointerKey,
+  jobPrefix,
+  jobRecordKey,
+  parseJobIdFromRecordKey,
+} from "./keys";
+import { r2Enabled } from "./env";
+import { getJsonObject, listObjectKeys, putJsonObject } from "./r2";
 import { listPathnames, readJson, saveJson } from "./storage";
 import type { Job, JobEvent, JobEventLevel, PublicJob } from "./types";
 
@@ -9,42 +17,90 @@ const cache = new Map<string, Job>();
 const abortControllers = new Map<string, AbortController>();
 
 export function toPublicJob(job: Job): PublicJob {
-  const { sourcePath: _sourcePath, outputPath: _outputPath, ...rest } = job;
+  const {
+    sourcePath: _sourcePath,
+    outputPath: _outputPath,
+    sourceObjectKey: _sourceObjectKey,
+    outputObjectKey: _outputObjectKey,
+    outputEtag: _outputEtag,
+    outputMultipartUploadId: _outputMultipartUploadId,
+    ...rest
+  } = job;
   void _sourcePath;
   void _outputPath;
+  void _sourceObjectKey;
+  void _outputObjectKey;
+  void _outputEtag;
+  void _outputMultipartUploadId;
   return rest;
 }
 
 async function persist(job: Job): Promise<void> {
-  await saveJson(`jobs/${job.id}.json`, job);
+  if (r2Enabled()) {
+    await putJsonObject(jobRecordKey(job.userId, job.id), job);
+    await putJsonObject(jobPointerKey(job.id), { userId: job.userId });
+  } else {
+    await saveJson(`jobs/${job.id}.json`, job);
+  }
   cache.set(job.id, job);
   emitter.emit(job.id, job);
   emitter.emit("all", job);
 }
 
 export async function loadJob(id: string): Promise<Job | null> {
+  const cached = cache.get(id);
+  if (cached) {
+    return cached;
+  }
+  if (r2Enabled()) {
+    const pointer = await getJsonObject<{ userId: string }>(jobPointerKey(id));
+    if (!pointer?.userId) {
+      return null;
+    }
+    const stored = await getJsonObject<Job>(jobRecordKey(pointer.userId, id));
+    if (stored) {
+      cache.set(id, stored);
+      return stored;
+    }
+    return null;
+  }
   const stored = await readJson<Job>(`jobs/${id}.json`);
   if (stored) {
     cache.set(id, stored);
     return stored;
   }
-  return cache.get(id) ?? null;
+  return null;
 }
 
-export async function listJobs(): Promise<Job[]> {
-  const pathnames = await listPathnames("jobs/");
+export async function listJobs(userId: string): Promise<Job[]> {
   const jobs: Job[] = [];
-  for (const pathname of pathnames) {
-    if (!pathname.endsWith(".json") || pathname.endsWith(".tmp")) {
-      continue;
+  if (r2Enabled()) {
+    const keys = await listObjectKeys(jobPrefix(userId));
+    for (const key of keys) {
+      const id = parseJobIdFromRecordKey(key);
+      if (!id) {
+        continue;
+      }
+      const job = await getJsonObject<Job>(key);
+      if (job && job.userId === userId) {
+        cache.set(job.id, job);
+        jobs.push(job);
+      }
     }
-    const id = pathname.split("/").pop()?.replace(/\.json$/, "");
-    if (!id) {
-      continue;
-    }
-    const job = await loadJob(id);
-    if (job) {
-      jobs.push(job);
+  } else {
+    const pathnames = await listPathnames("jobs/");
+    for (const pathname of pathnames) {
+      if (!pathname.endsWith(".json") || pathname.endsWith(".tmp")) {
+        continue;
+      }
+      const id = pathname.split("/").pop()?.replace(/\.json$/, "");
+      if (!id) {
+        continue;
+      }
+      const job = await loadJob(id);
+      if (job && job.userId === userId) {
+        jobs.push(job);
+      }
     }
   }
   return jobs.sort((a, b) => b.createdAt - a.createdAt);

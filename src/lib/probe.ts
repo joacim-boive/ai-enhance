@@ -2,8 +2,10 @@ import { spawn } from "node:child_process";
 import { mkdir, readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { ffmpegBin, ffprobeBin } from "./binaries";
-import { blobEnabled, isVercel } from "./env";
+import { isVercel, r2Enabled } from "./env";
 import { parseFrameRate } from "./format";
+import { jobThumbKey, mediaJobThumbUrl, mediaUploadThumbUrl, uploadThumbKey } from "./keys";
+import { putBytesToR2 } from "./r2";
 import { saveBytes } from "./storage";
 import { tmpPath } from "./tmp";
 import type { VideoMeta } from "./types";
@@ -90,6 +92,7 @@ export async function extractThumbnails(
   jobId: string,
   count = 8,
   durationSec = 3,
+  options?: { userId?: string; kind?: "job" | "upload" },
 ): Promise<string[]> {
   const dir = tmpPath(`thumbs-${jobId}`);
   await mkdir(dir, { recursive: true });
@@ -114,7 +117,24 @@ export async function extractThumbnails(
     const urls: string[] = [];
     for (const file of files) {
       const bytes = await readFile(path.join(dir, file));
-      if (isVercel() && !blobEnabled()) {
+      if (options?.userId && r2Enabled()) {
+        const objectKey =
+          options.kind === "upload"
+            ? uploadThumbKey(options.userId, jobId, file)
+            : jobThumbKey(options.userId, jobId, file);
+        await putBytesToR2({
+          objectKey,
+          data: bytes,
+          contentType: "image/jpeg",
+        });
+        urls.push(
+          options.kind === "upload"
+            ? mediaUploadThumbUrl(jobId, file)
+            : mediaJobThumbUrl(jobId, file),
+        );
+        continue;
+      }
+      if (isVercel()) {
         urls.push(`data:image/jpeg;base64,${bytes.toString("base64")}`);
         continue;
       }
