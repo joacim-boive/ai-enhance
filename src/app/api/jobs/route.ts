@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { blobEnabled, isVercel } from "@/lib/env";
 import { createJob, listJobs, toPublicJob } from "@/lib/jobs";
 import { startJob } from "@/lib/processor";
 import { DEFAULT_SETTINGS } from "@/lib/settings";
@@ -21,6 +22,15 @@ export async function GET(): Promise<Response> {
 }
 
 export async function POST(request: Request): Promise<Response> {
+  if (isVercel() && !blobEnabled()) {
+    return NextResponse.json(
+      {
+        error:
+          "Connect a Vercel Blob store to this project so jobs can persist across functions.",
+      },
+      { status: 503 },
+    );
+  }
   const body = (await request.json()) as CreateBody;
   if (!body.fileId) {
     return NextResponse.json({ error: "Missing fileId" }, { status: 400 });

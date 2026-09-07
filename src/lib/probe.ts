@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { mkdir, readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { ffmpegBin, ffprobeBin } from "./binaries";
+import { blobEnabled, isVercel } from "./env";
 import { parseFrameRate } from "./format";
 import { saveBytes } from "./storage";
 import { tmpPath } from "./tmp";
@@ -113,6 +114,10 @@ export async function extractThumbnails(
     const urls: string[] = [];
     for (const file of files) {
       const bytes = await readFile(path.join(dir, file));
+      if (isVercel() && !blobEnabled()) {
+        urls.push(`data:image/jpeg;base64,${bytes.toString("base64")}`);
+        continue;
+      }
       urls.push(await saveBytes(`thumbs/${jobId}/${file}`, bytes, "image/jpeg"));
     }
     return urls;

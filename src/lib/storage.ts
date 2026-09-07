@@ -4,6 +4,7 @@ import path from "node:path";
 import { get, list, put } from "@vercel/blob";
 import { blobEnabled } from "./env";
 import { DATA_DIR, ensureDirs } from "./paths";
+import { SAMPLE_FILE_ID, SAMPLE_STORED_FILE } from "./sample";
 
 export type StoredFile = {
   id: string;
@@ -17,6 +18,9 @@ function localFile(pathname: string): string {
 }
 
 export function localPathFor(pathname: string): string {
+  if (pathname.startsWith("public/")) {
+    return path.join(process.cwd(), pathname);
+  }
   return localFile(pathname);
 }
 
@@ -150,5 +154,8 @@ export async function saveStoredFile(record: StoredFile): Promise<void> {
 }
 
 export async function loadStoredFile(id: string): Promise<StoredFile | null> {
+  if (id === SAMPLE_FILE_ID) {
+    return SAMPLE_STORED_FILE;
+  }
   return readJson<StoredFile>(`files/${id}.json`);
 }

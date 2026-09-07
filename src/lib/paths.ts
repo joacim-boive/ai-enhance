@@ -1,7 +1,11 @@
-import { mkdir, readdir } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
+import { mkdir, readdir } from "node:fs/promises";
+import { isVercel } from "./env";
 
-export const DATA_DIR = path.join(process.cwd(), ".data");
+export const DATA_DIR = isVercel()
+  ? path.join(os.tmpdir(), "lumen-enhance")
+  : path.join(process.cwd(), ".data");
 export const UPLOADS_DIR = path.join(DATA_DIR, "uploads");
 export const JOBS_DIR = path.join(DATA_DIR, "jobs");
 export const OUTPUTS_DIR = path.join(DATA_DIR, "outputs");

@@ -198,6 +198,12 @@ export function StudioApp() {
       return;
     }
     try {
+      const latest = health ?? (await fetchHealth());
+      if (latest?.hosting === "vercel" && !latest.blob?.configured) {
+        throw new Error(
+          "Connect a Vercel Blob store to this project so enhancement jobs can persist.",
+        );
+      }
       const response = await fetch("/api/jobs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
