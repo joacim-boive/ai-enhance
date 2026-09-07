@@ -139,6 +139,7 @@ export async function submitGpuJob(input: {
   multipart: GpuMultipartGrant;
   scaleChanged: boolean;
   fpsChanged: boolean;
+  resolution: number;
 }): Promise<string> {
   const { apiKey, endpointId } = runpodConfig();
   if (!apiKey) {
@@ -151,6 +152,7 @@ export async function submitGpuJob(input: {
     upload_url: input.uploadUrl,
     object_key: input.objectKey,
     content_type: input.contentType,
+    resolution: input.resolution,
     multipart: {
       uploadId: input.multipart.uploadId,
       partSize: input.multipart.partSize,
@@ -202,6 +204,10 @@ export async function pollGpuJob(
   while (!signal.aborted) {
     const data = await getGpuJobStatus(jobId);
     if (data.status === "COMPLETED") {
+      const completedError = gpuOutputError(data.output);
+      if (completedError) {
+        throw new Error(gpuFailureMessage(completedError));
+      }
       return data.output;
     }
     if (
@@ -209,7 +215,7 @@ export async function pollGpuJob(
       data.status === "CANCELLED" ||
       data.status === "TIMED_OUT"
     ) {
-      throw new Error(data.error || `GPU job ${data.status.toLowerCase()}`);
+      throw new Error(gpuFailureMessage(collectGpuErrorText(data), data.status));
     }
     if (
       (data.status === "IN_QUEUE" || !data.status) &&
@@ -298,6 +304,46 @@ export function gpuOutputLooksLikeBytes(output: unknown): boolean {
   }
   const video = nested.video ?? nested.video_base64 ?? nested.data;
   return typeof video === "string" && video.length > 32;
+}
+
+export function gpuOutputError(output: unknown): string | null {
+  const nested = nestedRecord(output);
+  if (!nested || typeof nested.error !== "string" || nested.error.length === 0) {
+    return null;
+  }
+  return nested.error;
+}
+
+export function isGpuOom(text: string): boolean {
+  return /allocation on device|out of memory|cuda oom|cudnn_status_alloc_failed/i.test(
+    text,
+  );
+}
+
+export function gpuFailureMessage(text: string, status?: string): string {
+  if (isGpuOom(text)) {
+    return "GPU ran out of VRAM during SeedVR2 encoding (Allocation on device). 4K clips stay at 4K on the RTX 4090; try CPU if this keeps happening.";
+  }
+  const trimmed = text.trim();
+  if (trimmed.length > 0) {
+    return trimmed;
+  }
+  return `GPU job ${(status ?? "failed").toLowerCase()}`;
+}
+
+function collectGpuErrorText(data: RunpodStatusResponse): string {
+  const chunks: string[] = [];
+  if (typeof data.error === "string" && data.error.length > 0) {
+    chunks.push(data.error);
+  }
+  const nestedError = gpuOutputError(data.output);
+  if (nestedError) {
+    chunks.push(nestedError);
+  }
+  if (typeof data.output === "string" && data.output.length > 0) {
+    chunks.push(data.output);
+  }
+  return chunks.join("\n");
 }
 
 function sleep(ms: number, signal: AbortSignal): Promise<void> {

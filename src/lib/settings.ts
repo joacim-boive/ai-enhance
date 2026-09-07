@@ -166,6 +166,28 @@ export function resolveOutputTarget(
   };
 }
 
+/** Shortest output side the RTX 4090 worker can hold after VRAM tiling. */
+export const GPU_MAX_SHORT_SIDE = 2160;
+
+export type GpuHubResolution = {
+  resolution: number;
+  hubDefault: number;
+  capped: boolean;
+};
+
+export function gpuHubResolution(meta: VideoMeta, target: OutputTarget): GpuHubResolution {
+  const hubDefault = even(Math.min(meta.width, meta.height) * 2);
+  const requested = target.scaleChanged
+    ? Math.min(target.width, target.height)
+    : Math.min(meta.width, meta.height);
+  const resolution = even(Math.max(16, Math.min(requested, GPU_MAX_SHORT_SIDE)));
+  return {
+    resolution,
+    hubDefault,
+    capped: resolution < hubDefault,
+  };
+}
+
 export function roundFps(fps: number): number {
   if (!Number.isFinite(fps) || fps <= 0) {
     return 24;

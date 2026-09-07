@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { preferGpuEngine, resolveOutputTarget, settingsFromPreset } from "./settings";
+import { gpuHubResolution, preferGpuEngine, resolveOutputTarget, settingsFromPreset } from "./settings";
 import type { VideoMeta } from "./types";
 
 const meta: VideoMeta = {
@@ -60,4 +60,28 @@ test("auto stays on CPU when the GPU key is missing", () => {
     }),
     false,
   );
+});
+
+test("gpu Hub resolution caps 4K 2x at 2160 instead of 8K", () => {
+  const uhd: VideoMeta = { ...meta, width: 3840, height: 2160 };
+  const target = resolveOutputTarget(uhd, settingsFromPreset("restore"));
+  const hub = gpuHubResolution(uhd, target);
+  assert.equal(target.height, 4320);
+  assert.equal(hub.hubDefault, 4320);
+  assert.equal(hub.resolution, 2160);
+  assert.equal(hub.capped, true);
+});
+
+test("gpu Hub resolution keeps HFR at source short side", () => {
+  const target = resolveOutputTarget(meta, settingsFromPreset("hfr"));
+  const hub = gpuHubResolution(meta, target);
+  assert.equal(hub.resolution, 720);
+  assert.equal(hub.capped, true);
+});
+
+test("gpu Hub resolution sends 2x for 720p restore", () => {
+  const target = resolveOutputTarget(meta, settingsFromPreset("restore"));
+  const hub = gpuHubResolution(meta, target);
+  assert.equal(hub.resolution, 1440);
+  assert.equal(hub.capped, false);
 });

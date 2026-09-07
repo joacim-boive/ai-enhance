@@ -150,7 +150,7 @@ export function EnhancePanel({
           {working ? "Working…" : "Enhance video"}
         </button>
         <p className="text-center text-[11px] text-[var(--muted)]">
-          GPU uses SeedVR2 + RIFE 4.9. If it cannot start, we fall back automatically.
+          GPU uses SeedVR2 + RIFE 4.9 on an RTX 4090 (24 GB). Short side stays at 4K so 2× of UHD does not try 8K. We fall back to CPU if VRAM runs out.
         </p>
       </div>
     </aside>
