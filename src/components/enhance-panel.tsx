@@ -16,6 +16,7 @@ type Props = {
   meta: VideoMeta | null;
   health: HealthStatus | null;
   working: boolean;
+  workingLabel?: string;
   canEnhance: boolean;
   onChange: (settings: JobSettings) => void;
   onEnhance: () => void;
@@ -26,6 +27,7 @@ export function EnhancePanel({
   meta,
   health,
   working,
+  workingLabel = "Working…",
   canEnhance,
   onChange,
   onEnhance,
@@ -147,7 +149,7 @@ export function EnhancePanel({
           onClick={onEnhance}
           className="w-full rounded-full bg-[linear-gradient(180deg,#f3d7a8,#c48a42)] px-5 py-4 text-sm uppercase tracking-[0.22em] text-[#2a1c0a] disabled:opacity-40"
         >
-          {working ? "Working…" : "Enhance video"}
+          {working ? workingLabel : "Enhance video"}
         </button>
         <p className="text-center text-[11px] text-[var(--muted)]">
           GPU uses SeedVR2 + RIFE 4.9. If it cannot start, we fall back automatically.

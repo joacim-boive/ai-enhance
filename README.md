@@ -6,7 +6,7 @@ Production host: [ai-enhance-ruby.vercel.app](https://ai-enhance-ruby.vercel.app
 
 ## What v1 does
 
-- Drop an MP4 / MOV / WebM / MKV (including multi-GB masters), or try a 24 fps sample
+- Drop an MP4 / MOV / WebM / MKV (including multi-GB masters), paste a Google Drive file link, or try a 24 fps sample
 - Presets: Restore (2×), Cinema 4K, High Frame Rate (60 fps), Max (4K + 60)
 - Custom scale, target fps, denoise, and sharpen
 - Live job timeline, ETA, toasts, and a before/after split when the master is ready
@@ -15,6 +15,8 @@ Production host: [ai-enhance-ruby.vercel.app](https://ai-enhance-ruby.vercel.app
 - Cancel and retry without leaving the bench
 
 Masters are **private**. The object key is `users/{userId}/jobs/{jobId}/output.mp4`. Playback and download go through `/api/media`, which checks the session cookie and 302s to a short-lived SigV4 GET. Guessing a key is not enough. There is no public `*.r2.dev` URL, no base64 payload, and the file is never pulled through a Next.js function as a `Buffer`.
+
+Google Drive file links (Anyone with the link can view) are pulled server-side and streamed into that same private R2 prefix. Folders are rejected. Very large Drive files can hit the function time limit — drop those from disk instead.
 
 ## Vercel
 

@@ -1,6 +1,7 @@
 import "server-only";
 import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
+import { Readable } from "node:stream";
 import {
   AbortMultipartUploadCommand,
   CompleteMultipartUploadCommand,
@@ -336,5 +337,33 @@ export async function putBytesToR2(input: {
       Body: input.data,
       ContentType: input.contentType,
     }),
+  );
+}
+
+export async function uploadWebStreamToR2(input: {
+  objectKey: string;
+  body: ReadableStream<Uint8Array>;
+  contentType: string;
+}): Promise<R2Head> {
+  const { client, bucket } = requireR2();
+  const upload = new Upload({
+    client,
+    params: {
+      Bucket: bucket,
+      Key: input.objectKey,
+      Body: Readable.fromWeb(input.body as never),
+      ContentType: input.contentType,
+    },
+    partSize: R2_PART_SIZE,
+    queueSize: 2,
+  });
+  const result = await upload.done();
+  const head = await headObject(input.objectKey);
+  return (
+    head ?? {
+      contentLength: null,
+      etag: result.ETag ?? null,
+      contentType: input.contentType,
+    }
   );
 }
