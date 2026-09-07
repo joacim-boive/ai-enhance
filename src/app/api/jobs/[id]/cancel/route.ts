@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { loadJob, patchJob, requestCancel, toPublicJob } from "@/lib/jobs";
+import { requireOwnedJob } from "@/lib/authz";
+import { patchJob, requestCancel, toPublicJob } from "@/lib/jobs";
 import { cancelGpuJob } from "@/lib/runpod";
 
 export const runtime = "nodejs";
@@ -14,7 +15,7 @@ export async function POST(
   context: RouteContext,
 ): Promise<Response> {
   const { id } = await context.params;
-  const job = await loadJob(id);
+  const job = await requireOwnedJob(id);
   if (!job) {
     return NextResponse.json({ error: "Job not found" }, { status: 404 });
   }

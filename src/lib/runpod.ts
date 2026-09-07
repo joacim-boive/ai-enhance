@@ -1,4 +1,5 @@
 import { missingGpuKeyMessage, runtimeEnv } from "./env";
+import { r2Enabled } from "./r2";
 import type { HealthStatus } from "./types";
 
 const DEFAULT_ENDPOINT = "tbsk82cmm6azwh";
@@ -78,7 +79,10 @@ export async function gpuHealth(): Promise<HealthStatus["gpu"]> {
     };
     const ready = workers.idle + workers.running > 0;
     let message = "GPU is cold. The first job warms a worker, then runs SeedVR2 + RIFE.";
-    if (ready) {
+    if (!r2Enabled()) {
+      message =
+        "GPU is configured, but Cloudflare R2 is missing. The worker cannot land a private master without a presigned upload.";
+    } else if (ready) {
       message = "GPU workers are available.";
     } else if (workers.initializing > 0) {
       message =
@@ -89,7 +93,7 @@ export async function gpuHealth(): Promise<HealthStatus["gpu"]> {
     return {
       configured: true,
       endpointId,
-      ready,
+      ready: r2Enabled() ? ready : false,
       workers,
       message,
     };
@@ -114,9 +118,26 @@ function taskTypeFor(scaleChanged: boolean, fpsChanged: boolean): "upscale" | "u
   return "upscale_and_interpolation";
 }
 
+export type GpuMultipartGrant = {
+  uploadId: string;
+  partSize: number;
+  partUrls: string[];
+};
+
+export type GpuObjectOutput = {
+  objectKey: string;
+  byteSize: number;
+  etag: string | null;
+  uploadId: string | null;
+  parts: { partNumber: number; etag: string }[] | null;
+};
+
 export async function submitGpuJob(input: {
-  videoUrl?: string;
-  videoBase64?: string;
+  videoUrl: string;
+  uploadUrl: string;
+  objectKey: string;
+  contentType: string;
+  multipart: GpuMultipartGrant;
   scaleChanged: boolean;
   fpsChanged: boolean;
 }): Promise<string> {
@@ -127,14 +148,16 @@ export async function submitGpuJob(input: {
   const body: Record<string, unknown> = {
     task_type: taskTypeFor(input.scaleChanged, input.fpsChanged),
     network_volume: false,
+    video_url: input.videoUrl,
+    upload_url: input.uploadUrl,
+    object_key: input.objectKey,
+    content_type: input.contentType,
+    multipart: {
+      uploadId: input.multipart.uploadId,
+      partSize: input.multipart.partSize,
+      partUrls: input.multipart.partUrls,
+    },
   };
-  if (input.videoUrl) {
-    body.video_url = input.videoUrl;
-  } else if (input.videoBase64) {
-    body.video_base64 = input.videoBase64;
-  } else {
-    throw new Error("GPU job needs a public video URL or a small base64 payload");
-  }
   const response = await fetch(`https://api.runpod.ai/v2/${endpointId}/run`, {
     method: "POST",
     headers: {
@@ -213,58 +236,69 @@ export async function cancelGpuJob(runpodJobId: string): Promise<void> {
   }).catch(() => undefined);
 }
 
-export function extractRemoteVideoUrl(output: unknown): string | null {
-  if (!output || typeof output !== "object") {
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object") {
     return null;
   }
-  const record = output as Record<string, unknown>;
-  const nested =
-    record.output && typeof record.output === "object"
-      ? (record.output as Record<string, unknown>)
-      : record;
-  for (const value of [nested.video_url, nested.url, nested.output_url, nested.path]) {
-    if (typeof value === "string" && /^https?:\/\//i.test(value)) {
-      return value;
+  return value as Record<string, unknown>;
+}
+
+function nestedRecord(output: unknown): Record<string, unknown> | null {
+  const record = asRecord(output);
+  if (!record) {
+    return null;
+  }
+  const nested = asRecord(record.output);
+  return nested ?? record;
+}
+
+export function parseGpuObjectOutput(output: unknown): GpuObjectOutput | null {
+  const nested = nestedRecord(output);
+  if (!nested) {
+    return null;
+  }
+  const objectKey =
+    (typeof nested.object_key === "string" && nested.object_key) ||
+    (typeof nested.objectKey === "string" && nested.objectKey) ||
+    null;
+  if (!objectKey) {
+    return null;
+  }
+  const byteSizeRaw = nested.byte_size ?? nested.byteSize ?? nested.size;
+  const byteSize = typeof byteSizeRaw === "number" ? byteSizeRaw : Number(byteSizeRaw);
+  const etagRaw = nested.etag ?? nested.ETag;
+  const uploadIdRaw = nested.upload_id ?? nested.uploadId;
+  const partsRaw = nested.parts;
+  const parts: { partNumber: number; etag: string }[] = [];
+  if (Array.isArray(partsRaw)) {
+    for (const part of partsRaw) {
+      const item = asRecord(part);
+      if (!item) {
+        continue;
+      }
+      const partNumber = Number(item.partNumber ?? item.part_number ?? item.PartNumber);
+      const etag = item.etag ?? item.ETag;
+      if (Number.isInteger(partNumber) && typeof etag === "string" && etag.length > 0) {
+        parts.push({ partNumber, etag });
+      }
     }
   }
-  return null;
+  return {
+    objectKey,
+    byteSize: Number.isFinite(byteSize) ? byteSize : 0,
+    etag: typeof etagRaw === "string" ? etagRaw : null,
+    uploadId: typeof uploadIdRaw === "string" ? uploadIdRaw : null,
+    parts: parts.length > 0 ? parts : null,
+  };
 }
 
-export async function materializeGpuOutput(output: unknown): Promise<Buffer> {
-  const inline = extractVideoPayload(output);
-  if (inline) {
-    return inline;
+export function gpuOutputLooksLikeBytes(output: unknown): boolean {
+  const nested = nestedRecord(output);
+  if (!nested) {
+    return false;
   }
-  const remote = extractRemoteVideoUrl(output);
-  if (!remote) {
-    throw new Error("GPU finished but did not return a video payload");
-  }
-  const response = await fetch(remote);
-  if (!response.ok) {
-    throw new Error(`GPU output download failed (${response.status})`);
-  }
-  return Buffer.from(await response.arrayBuffer());
-}
-
-export function extractVideoPayload(output: unknown): Buffer | null {
-  if (!output || typeof output !== "object") {
-    return null;
-  }
-  const record = output as Record<string, unknown>;
-  const nested =
-    record.output && typeof record.output === "object"
-      ? (record.output as Record<string, unknown>)
-      : record;
   const video = nested.video ?? nested.video_base64 ?? nested.data;
-  if (typeof video !== "string" || video.length < 32) {
-    return null;
-  }
-  const payload = video.includes("base64,") ? video.split("base64,")[1] : video;
-  try {
-    return Buffer.from(payload, "base64");
-  } catch {
-    return null;
-  }
+  return typeof video === "string" && video.length > 32;
 }
 
 function sleep(ms: number, signal: AbortSignal): Promise<void> {
@@ -285,5 +319,4 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
   });
 }
 
-export const GPU_BASE64_LIMIT = 8 * 1024 * 1024;
 export const GPU_QUEUE_TIMEOUT_MS = 6 * 60 * 1000;

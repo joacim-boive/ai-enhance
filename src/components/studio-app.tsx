@@ -1,8 +1,8 @@
 "use client";
 
-import { uploadPresigned } from "@vercel/blob/client";
 import { useEffect, useRef, useState } from "react";
-import { ACCEPTED_EXTENSIONS, DEFAULT_SETTINGS } from "@/lib/settings";
+import { uploadBrowserFile } from "@/lib/browser-upload";
+import { DEFAULT_SETTINGS } from "@/lib/settings";
 import type { HealthStatus, JobSettings, PublicJob, Toast, VideoMeta } from "@/lib/types";
 import { AppHeader } from "./app-header";
 import { ComparisonViewer } from "./comparison-viewer";
@@ -142,11 +142,11 @@ export function StudioApp() {
     try {
       const latest = health ?? (await fetchHealth());
       let data: UploadedFile;
-      if (latest?.blob?.configured) {
-        data = await uploadViaBlob(input);
+      if (latest?.r2?.configured) {
+        data = await uploadViaR2(input);
       } else if (latest?.hosting === "vercel") {
         throw new Error(
-          "Connect a Vercel Blob store to this project so clips can upload past the function body limit.",
+          "Add Cloudflare R2 credentials so clips upload privately and never pass through Vercel as a Buffer.",
         );
       } else {
         data = await uploadViaForm(input);
@@ -201,9 +201,9 @@ export function StudioApp() {
     try {
       setStarting(true);
       const latest = health ?? (await fetchHealth());
-      if (latest?.hosting === "vercel" && !latest.blob?.configured) {
+      if (latest?.hosting === "vercel" && !latest.r2?.configured) {
         throw new Error(
-          "Connect a Vercel Blob store to this project so enhancement jobs can persist.",
+          "Add Cloudflare R2 credentials so enhancement jobs can persist private masters.",
         );
       }
       const jobSettings = settingsForHealth(settings, latest ?? health);
@@ -276,6 +276,13 @@ export function StudioApp() {
           {health.gpu.message}
         </div>
       ) : null}
+      {health?.hosting === "vercel" && !health.r2?.configured ? (
+        <div className="mb-6 rounded-2xl border border-[var(--gold)]/40 bg-[rgba(226,181,122,0.08)] px-4 py-3 text-sm leading-6 text-[var(--gold)]">
+          Cloudflare R2 is unset on this deployment. Private GB masters cannot land until
+          R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET_NAME, and
+          SESSION_SECRET are set, then Redeploy.
+        </div>
+      ) : null}
       <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">
         <div>
           {file ? (
@@ -337,16 +344,63 @@ async function fetchHealth(): Promise<HealthStatus | null> {
 }
 
 function settingsForHealth(settings: JobSettings, health: HealthStatus | null): JobSettings {
-  if (health && !health.gpu.configured && settings.enginePreference === "gpu") {
+  if (
+    health &&
+    settings.enginePreference === "gpu" &&
+    (!health.gpu.configured || !health.r2?.configured)
+  ) {
     return { ...settings, enginePreference: "auto" };
   }
   return settings;
 }
 
-function extensionOf(name: string): string {
-  const match = /\.[a-z0-9]+$/i.exec(name);
-  const ext = match ? match[0].toLowerCase() : ".mp4";
-  return ACCEPTED_EXTENSIONS.some((item) => item === ext) ? ext : ".mp4";
+async function uploadViaR2(input: File): Promise<UploadedFile> {
+  const tokenResponse = await fetch("/api/upload/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      name: input.name,
+      size: input.size,
+      contentType: input.type || "video/mp4",
+    }),
+  });
+  const token = (await tokenResponse.json()) as {
+    fileId?: string;
+    objectKey?: string;
+    contentType?: string;
+    putUrl?: string;
+    multipart?: {
+      uploadId: string;
+      partSize: number;
+      partUrls: string[];
+    } | null;
+    error?: string;
+  };
+  if (!tokenResponse.ok || !token.fileId || !token.objectKey || !token.putUrl) {
+    throw new Error(token.error || "Could not mint a private upload URL");
+  }
+  const uploaded = await uploadBrowserFile({
+    file: input,
+    contentType: token.contentType || input.type || "video/mp4",
+    putUrl: token.putUrl,
+    multipart: token.multipart ?? null,
+  });
+  const response = await fetch("/api/ingest", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      id: token.fileId,
+      name: input.name,
+      objectKey: token.objectKey,
+      uploadId: uploaded.uploadId,
+      parts: uploaded.parts,
+    }),
+  });
+  const data = (await response.json()) as UploadedFile & { error?: string };
+  if (!response.ok) {
+    throw new Error(data.error || "Could not probe that clip");
+  }
+  return data;
 }
 
 async function uploadViaForm(input: File): Promise<UploadedFile> {
@@ -356,31 +410,6 @@ async function uploadViaForm(input: File): Promise<UploadedFile> {
   const data = (await response.json()) as UploadedFile & { error?: string };
   if (!response.ok) {
     throw new Error(data.error || "Upload failed");
-  }
-  return data;
-}
-
-async function uploadViaBlob(input: File): Promise<UploadedFile> {
-  const id = crypto.randomUUID();
-  const blob = await uploadPresigned(`uploads/${id}${extensionOf(input.name)}`, input, {
-    access: "public",
-    handleUploadUrl: "/api/upload/token",
-    clientPayload: JSON.stringify({ id, name: input.name }),
-    multipart: true,
-  });
-  const response = await fetch("/api/ingest", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      id,
-      name: input.name,
-      url: blob.url,
-      pathname: blob.pathname,
-    }),
-  });
-  const data = (await response.json()) as UploadedFile & { error?: string };
-  if (!response.ok) {
-    throw new Error(data.error || "Could not probe that clip");
   }
   return data;
 }

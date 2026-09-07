@@ -5,7 +5,8 @@ import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { NextResponse } from "next/server";
 import { ingestLocalVideo } from "@/lib/ingest";
-import { ACCEPTED_EXTENSIONS, MAX_UPLOAD_BYTES } from "@/lib/settings";
+import { requireSession } from "@/lib/authz";
+import { ACCEPTED_EXTENSIONS, MAX_FORM_UPLOAD_BYTES } from "@/lib/settings";
 import { tmpPath } from "@/lib/tmp";
 
 export const runtime = "nodejs";
@@ -25,13 +26,14 @@ export async function POST(request: Request): Promise<Response> {
       { status: 400 },
     );
   }
-  if (file.size > MAX_UPLOAD_BYTES) {
+  if (file.size > MAX_FORM_UPLOAD_BYTES) {
     return NextResponse.json(
-      { error: "That file is over 512 MB. Trim it first, then try again." },
+      { error: "That file is over 80 MB for a direct upload. Use private R2 for larger masters." },
       { status: 413 },
     );
   }
 
+  const session = await requireSession();
   const id = crypto.randomUUID();
   const dest = tmpPath(`${id}${ext || ".mp4"}`);
   const nodeStream = Readable.fromWeb(file.stream() as never);
@@ -41,6 +43,7 @@ export async function POST(request: Request): Promise<Response> {
       id,
       name: file.name,
       localPath: dest,
+      userId: session.userId,
     });
     await unlink(dest).catch(() => undefined);
     return NextResponse.json(ingested);

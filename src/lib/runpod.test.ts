@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { isGpuConfigured, runpodConfig } from "./runpod";
+import { gpuOutputLooksLikeBytes, isGpuConfigured, parseGpuObjectOutput, runpodConfig } from "./runpod";
 
 test("runpodConfig reads RUNPOD_API_KEY at call time", () => {
   const previousKey = process.env.RUNPOD_API_KEY;
@@ -24,4 +24,18 @@ test("runpodConfig reads RUNPOD_API_KEY at call time", () => {
   if (previousEndpoint) {
     process.env.RUNPOD_ENDPOINT_ID = previousEndpoint;
   }
+});
+
+test("parseGpuObjectOutput reads object_key and never requires inline bytes", () => {
+  const parsed = parseGpuObjectOutput({
+    object_key: "users/11111111-1111-4111-8111-111111111111/jobs/22222222-2222-4222-8222-222222222222/output.mp4",
+    byte_size: 2048,
+    etag: "abc",
+  });
+  assert.equal(parsed?.byteSize, 2048);
+  assert.equal(parsed?.etag, "abc");
+  assert.equal(parsed?.objectKey.endsWith("/output.mp4"), true);
+  assert.equal(parseGpuObjectOutput({ video_path: "/ComfyUI/output/x.mp4" }), null);
+  assert.equal(gpuOutputLooksLikeBytes({ video: "a".repeat(40) }), true);
+  assert.equal(gpuOutputLooksLikeBytes({ object_key: "users/x/jobs/y/output.mp4" }), false);
 });

@@ -38,6 +38,13 @@ export function missingGpuKeyMessage(environment: HostEnvironment = hostEnvironm
   return "Add RUNPOD_API_KEY to .env.local to enable GPU processing. CPU fallback is active.";
 }
 
+export function missingR2Message(environment: HostEnvironment = hostEnvironment()): string {
+  if (environment === "local") {
+    return "Add Cloudflare R2 credentials to .env.local for private GB masters. Local disk is fine for small clips.";
+  }
+  return "Add R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET_NAME, and SESSION_SECRET on this Vercel environment, then Redeploy. Masters stay private in R2 — not public Blob, not base64.";
+}
+
 export function publicBaseUrl(): string {
   const explicit = process.env.PUBLIC_BASE_URL?.trim().replace(/\/$/, "");
   if (explicit) {

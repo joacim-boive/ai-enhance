@@ -1,9 +1,11 @@
 import path from "node:path";
 import { NextResponse } from "next/server";
-import { loadJob } from "@/lib/jobs";
-import { localPathFor, loadStoredFile } from "@/lib/storage";
+import { requireOwnedJob } from "@/lib/authz";
+import { jobThumbKey } from "@/lib/keys";
+import { presignGetUrl, r2Enabled } from "@/lib/r2";
+import { SAMPLE_PUBLIC_PATH, SAMPLE_SOURCE_PATH } from "@/lib/sample";
+import { localPathFor } from "@/lib/storage";
 import { streamLocalFile } from "@/lib/stream-file";
-import { isHttpUrl, withDownloadParam } from "@/lib/url";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,59 +18,101 @@ export async function GET(
   request: Request,
   context: RouteContext,
 ): Promise<Response> {
+  return mediaResponse(request, context);
+}
+
+export async function HEAD(
+  request: Request,
+  context: RouteContext,
+): Promise<Response> {
+  return mediaResponse(request, context);
+}
+
+async function mediaResponse(
+  request: Request,
+  context: RouteContext,
+): Promise<Response> {
   const { jobId, kind, rest = [] } = await context.params;
   const wantsDownload = new URL(request.url).searchParams.get("download") === "1";
-  let url: string | null = null;
-  let filePath: string | null = null;
-  let downloadName = "clip.mp4";
-  let cacheControl: string | undefined;
+  const job = await requireOwnedJob(jobId);
+  if (!job) {
+    return new Response("Not found", { status: 404 });
+  }
 
-  if (kind === "source") {
-    const job = await loadJob(jobId);
-    const stored = job ? null : await loadStoredFile(jobId);
-    url = job?.sourceUrl ?? stored?.url ?? null;
-    downloadName = job?.name ?? stored?.name ?? "source.mp4";
-    if (job && !isHttpUrl(job.sourceUrl)) {
-      filePath = job.sourcePath.startsWith("/")
-        ? job.sourcePath
-        : localPathFor(job.sourcePath);
-    } else if (stored && !isHttpUrl(stored.url)) {
-      filePath = localPathFor(stored.pathname);
-    }
-  } else if (kind === "output") {
-    const job = await loadJob(jobId);
-    if (!job) {
-      return new Response("Not found", { status: 404 });
-    }
-    url = job.outputUrl;
-    downloadName = enhanceName(job.name);
-    if (job.outputPath && !isHttpUrl(job.outputUrl ?? "")) {
-      filePath = job.outputPath.startsWith("/")
-        ? job.outputPath
-        : localPathFor(job.outputPath);
-    }
-  } else if (kind === "thumb") {
+  if (kind === "thumb") {
     const filename = rest[0];
     if (!filename || filename.includes("..") || filename.includes("/")) {
       return new Response("Not found", { status: 404 });
     }
-    filePath = localPathFor(`thumbs/${jobId}/${filename}`);
-    cacheControl = "public, max-age=86400";
-  } else {
-    return new Response("Not found", { status: 404 });
+    if (r2Enabled()) {
+      const signed = await presignGetUrl(jobThumbKey(job.userId, job.id, filename));
+      return NextResponse.redirect(signed, 302);
+    }
+    try {
+      return await streamLocalFile(localPathFor(`thumbs/${jobId}/${filename}`), request, {
+        cacheControl: "private, max-age=86400",
+      });
+    } catch {
+      return new Response("Not found", { status: 404 });
+    }
   }
 
-  if (url && isHttpUrl(url)) {
-    return NextResponse.redirect(wantsDownload ? withDownloadParam(url) : url);
+  if (kind === "source") {
+    if (job.sourceObjectKey && r2Enabled()) {
+      const signed = await presignGetUrl(job.sourceObjectKey, {
+        downloadName: wantsDownload ? job.name : undefined,
+      });
+      return NextResponse.redirect(signed, 302);
+    }
+    if (job.sourcePath === SAMPLE_SOURCE_PATH) {
+      return NextResponse.redirect(new URL(SAMPLE_PUBLIC_PATH, request.url), 302);
+    }
+    if (job.sourcePath.startsWith("public/")) {
+      return NextResponse.redirect(
+        new URL(`/${job.sourcePath.replace(/^public\//, "")}`, request.url),
+        302,
+      );
+    }
+    try {
+      return await streamLocalFile(localPathFor(job.sourcePath), request, {
+        downloadName: job.name,
+      });
+    } catch {
+      return new Response("Not found", { status: 404 });
+    }
   }
-  if (!filePath) {
-    return new Response("Not found", { status: 404 });
+
+  if (kind === "output") {
+    if (job.outputObjectKey && r2Enabled()) {
+      const signed = await presignGetUrl(job.outputObjectKey, {
+        downloadName: wantsDownload ? enhanceName(job.name) : undefined,
+      });
+      return NextResponse.redirect(signed, 302);
+    }
+    if (job.outputPath === SAMPLE_SOURCE_PATH || job.outputPath === job.sourcePath) {
+      if (job.sourceObjectKey && r2Enabled()) {
+        const signed = await presignGetUrl(job.sourceObjectKey, {
+          downloadName: wantsDownload ? enhanceName(job.name) : undefined,
+        });
+        return NextResponse.redirect(signed, 302);
+      }
+      if (job.sourcePath === SAMPLE_SOURCE_PATH) {
+        return NextResponse.redirect(new URL(SAMPLE_PUBLIC_PATH, request.url), 302);
+      }
+    }
+    if (!job.outputPath) {
+      return new Response("Not found", { status: 404 });
+    }
+    try {
+      return await streamLocalFile(localPathFor(job.outputPath), request, {
+        downloadName: enhanceName(job.name),
+      });
+    } catch {
+      return new Response("Not found", { status: 404 });
+    }
   }
-  try {
-    return await streamLocalFile(filePath, request, { downloadName, cacheControl });
-  } catch {
-    return new Response("Not found", { status: 404 });
-  }
+
+  return new Response("Not found", { status: 404 });
 }
 
 function enhanceName(name: string): string {

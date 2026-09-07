@@ -2,6 +2,7 @@ import path from "node:path";
 import { localPathFor } from "@/lib/storage";
 import { streamLocalFile } from "@/lib/stream-file";
 import { blobEnabled } from "@/lib/env";
+import { r2Enabled } from "@/lib/r2";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,7 +15,7 @@ export async function GET(
   request: Request,
   context: RouteContext,
 ): Promise<Response> {
-  if (blobEnabled()) {
+  if (blobEnabled() || r2Enabled()) {
     return new Response("Not found", { status: 404 });
   }
   const { pathname } = await context.params;

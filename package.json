@@ -7,9 +7,12 @@
     "build": "next build",
     "start": "next start --hostname 0.0.0.0 --port 3000",
     "lint": "eslint",
-    "test": "npx --yes tsx --test src/lib/settings.test.ts src/lib/ffmpeg-graph.test.ts src/lib/url.test.ts src/lib/env.test.ts src/lib/runpod.test.ts"
+    "test": "npx --yes tsx --test src/lib/settings.test.ts src/lib/ffmpeg-graph.test.ts src/lib/url.test.ts src/lib/env.test.ts src/lib/runpod.test.ts src/lib/keys.test.ts src/lib/session.test.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1127.0",
+    "@aws-sdk/lib-storage": "^3.1127.0",
+    "@aws-sdk/s3-request-presigner": "^3.1127.0",
     "@vercel/blob": "^2.8.0",
     "ffmpeg-static": "^5.3.0",
     "ffprobe-static": "^3.1.0",

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { hostEnvironment, missingGpuKeyMessage, runtimeEnv } from "./env";
+import { hostEnvironment, missingGpuKeyMessage, missingR2Message, runtimeEnv } from "./env";
 
 test("runtimeEnv reads process.env at call time", () => {
   const key = "LUMEN_TEST_RUNTIME_ENV";
@@ -17,6 +17,12 @@ test("missingGpuKeyMessage names the Vercel environment", () => {
   assert.match(missingGpuKeyMessage("preview"), /Preview/);
   assert.match(missingGpuKeyMessage("production"), /Production/);
   assert.match(missingGpuKeyMessage("local"), /\.env\.local/);
+});
+
+test("missingR2Message names private storage", () => {
+  assert.match(missingR2Message("preview"), /R2_/);
+  assert.match(missingR2Message("production"), /SESSION_SECRET/);
+  assert.match(missingR2Message("local"), /\.env\.local/);
 });
 
 test("hostEnvironment maps VERCEL_ENV", () => {

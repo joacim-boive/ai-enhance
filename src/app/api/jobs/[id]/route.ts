@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
-import { loadJob, toPublicJob } from "@/lib/jobs";
+import { requireOwnedJob } from "@/lib/authz";
 import { resumeGpuJob } from "@/lib/processor";
+import { toPublicJob } from "@/lib/jobs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -15,10 +16,11 @@ export async function GET(
   context: RouteContext,
 ): Promise<Response> {
   const { id } = await context.params;
-  await resumeGpuJob(id);
-  const job = await loadJob(id);
+  const job = await requireOwnedJob(id);
   if (!job) {
     return NextResponse.json({ error: "Job not found" }, { status: 404 });
   }
-  return NextResponse.json({ job: toPublicJob(job) });
+  await resumeGpuJob(id);
+  const latest = (await requireOwnedJob(id)) ?? job;
+  return NextResponse.json({ job: toPublicJob(latest) });
 }
