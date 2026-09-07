@@ -1,6 +1,6 @@
 "use client";
 
-import { upload } from "@vercel/blob/client";
+import { uploadPresigned } from "@vercel/blob/client";
 import { useEffect, useRef, useState } from "react";
 import { ACCEPTED_EXTENSIONS, DEFAULT_SETTINGS } from "@/lib/settings";
 import type { HealthStatus, JobSettings, PublicJob, Toast, VideoMeta } from "@/lib/types";
@@ -347,7 +347,7 @@ async function uploadViaForm(input: File): Promise<UploadedFile> {
 
 async function uploadViaBlob(input: File): Promise<UploadedFile> {
   const id = crypto.randomUUID();
-  const blob = await upload(`uploads/${id}${extensionOf(input.name)}`, input, {
+  const blob = await uploadPresigned(`uploads/${id}${extensionOf(input.name)}`, input, {
     access: "public",
     handleUploadUrl: "/api/upload/token",
     clientPayload: JSON.stringify({ id, name: input.name }),

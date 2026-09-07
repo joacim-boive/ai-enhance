@@ -1,4 +1,5 @@
-import { handleUpload, type HandleUploadBody } from "@vercel/blob/client";
+import { issueSignedToken } from "@vercel/blob";
+import { handleUploadPresigned, type HandleUploadPresignedBody } from "@vercel/blob/client";
 import { NextResponse } from "next/server";
 import { ACCEPTED_VIDEO_TYPES, MAX_UPLOAD_BYTES } from "@/lib/settings";
 
@@ -8,26 +9,37 @@ export const dynamic = "force-dynamic";
 const PATH_PATTERN =
   /^uploads\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.[a-z0-9]+$/;
 
+const ALLOWED_CONTENT_TYPES = [...ACCEPTED_VIDEO_TYPES, "application/octet-stream", "video/*"];
+
 export async function POST(request: Request): Promise<Response> {
-  const body = (await request.json()) as HandleUploadBody;
+  const body = (await request.json()) as HandleUploadPresignedBody;
   try {
-    const jsonResponse = await handleUpload({
+    const jsonResponse = await handleUploadPresigned({
       body,
       request,
-      onBeforeGenerateToken: async (pathname) => {
+      getSignedToken: async (pathname) => {
         if (!PATH_PATTERN.test(pathname)) {
           throw new Error("Invalid upload path");
         }
-        return {
-          allowedContentTypes: [...ACCEPTED_VIDEO_TYPES, "application/octet-stream", "video/*"],
-          addRandomSuffix: false,
-          allowOverwrite: true,
+        const token = await issueSignedToken({
+          pathname,
+          operations: ["put"],
+          allowedContentTypes: ALLOWED_CONTENT_TYPES,
           maximumSizeInBytes: MAX_UPLOAD_BYTES,
           validUntil: Date.now() + 60 * 60 * 1000,
+        });
+        return {
+          token,
+          urlOptions: {
+            addRandomSuffix: false,
+            allowOverwrite: true,
+            allowedContentTypes: ALLOWED_CONTENT_TYPES,
+            maximumSizeInBytes: MAX_UPLOAD_BYTES,
+          },
         };
       },
       onUploadCompleted: async () => {
-        // Ingest happens from the client after upload() resolves so localhost works too.
+        // Ingest happens from the client after uploadPresigned() resolves.
       },
     });
     return NextResponse.json(jsonResponse);

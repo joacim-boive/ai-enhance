@@ -3,7 +3,7 @@ export function isVercel(): boolean {
 }
 
 export function blobEnabled(): boolean {
-  return Boolean(process.env.BLOB_READ_WRITE_TOKEN);
+  return Boolean(process.env.BLOB_READ_WRITE_TOKEN || process.env.BLOB_STORE_ID);
 }
 
 export function publicBaseUrl(): string {

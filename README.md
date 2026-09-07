@@ -18,7 +18,7 @@ Production host: [ai-enhance-ruby.vercel.app](https://ai-enhance-ruby.vercel.app
 
 This repo is already linked to the Vercel project. Preview and production builds should kick off from Git as usual.
 
-Connect a **Blob** store to the project (Storage → Blob) so `BLOB_READ_WRITE_TOKEN` is injected. Without it, the studio cannot accept real clips on Vercel — function request bodies cap at 4.5 MB, so the browser uploads straight to Blob.
+Connect a **Blob** store to the project. That injects `BLOB_STORE_ID` and `BLOB_WEBHOOK_PUBLIC_KEY` (OIDC). The studio uses those for server writes and browser uploads. Without Blob, real clips cannot persist on Vercel.
 
 Also set in the Vercel project (Production + Preview):
 
