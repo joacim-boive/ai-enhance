@@ -123,3 +123,12 @@ export type Toast = {
   body: string;
   tone: ToastTone;
 };
+
+export type SourceTransferPhase = "preparing" | "uploading" | "importing" | "probing";
+
+export type SourceTransfer = {
+  phase: SourceTransferPhase;
+  name: string;
+  loaded: number;
+  total: number;
+};
