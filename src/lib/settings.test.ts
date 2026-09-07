@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { preferGpuEngine, resolveOutputTarget, settingsFromPreset } from "./settings";
+import {
+  gpuHubResolution,
+  outputSizeNotice,
+  preferGpuEngine,
+  resolveOutputTarget,
+  scaleExceeds8k,
+  settingsFromPreset,
+  withCustomOverride,
+} from "./settings";
 import type { VideoMeta } from "./types";
 
 const meta: VideoMeta = {
@@ -60,4 +68,56 @@ test("auto stays on CPU when the GPU key is missing", () => {
     }),
     false,
   );
+});
+
+test("gpu Hub resolution caps 4K 2x at 2160 instead of 8K", () => {
+  const uhd: VideoMeta = { ...meta, width: 3840, height: 2160 };
+  const target = resolveOutputTarget(uhd, settingsFromPreset("restore"));
+  const hub = gpuHubResolution(uhd, target);
+  assert.equal(target.height, 4320);
+  assert.equal(hub.hubDefault, 4320);
+  assert.equal(hub.resolution, 2160);
+  assert.equal(hub.capped, true);
+});
+
+test("gpu Hub resolution keeps HFR at source short side", () => {
+  const target = resolveOutputTarget(meta, settingsFromPreset("hfr"));
+  const hub = gpuHubResolution(meta, target);
+  assert.equal(hub.resolution, 720);
+  assert.equal(hub.capped, true);
+});
+
+test("gpu Hub resolution sends 2x for 720p restore", () => {
+  const target = resolveOutputTarget(meta, settingsFromPreset("restore"));
+  const hub = gpuHubResolution(meta, target);
+  assert.equal(hub.resolution, 1440);
+  assert.equal(hub.capped, false);
+});
+
+test("4K restore is 8K and warns above UHD", () => {
+  const uhd: VideoMeta = { ...meta, width: 3840, height: 2160 };
+  const target = resolveOutputTarget(uhd, settingsFromPreset("restore"));
+  assert.equal(target.width, 7680);
+  assert.equal(target.height, 4320);
+  assert.equal(target.cappedAt8k, false);
+  assert.equal(target.exceedsUhd, true);
+  assert.match(outputSizeNotice(target)?.message ?? "", /Above 4K/);
+  assert.equal(scaleExceeds8k(uhd, "2x"), false);
+  assert.equal(scaleExceeds8k(uhd, "4x"), true);
+});
+
+test("4x of 4K is capped at 8K", () => {
+  const uhd: VideoMeta = { ...meta, width: 3840, height: 2160 };
+  const target = resolveOutputTarget(uhd, withCustomOverride(settingsFromPreset("restore"), { scale: "4x" }));
+  assert.equal(target.width, 7680);
+  assert.equal(target.height, 4320);
+  assert.equal(target.requestedWidth, 15360);
+  assert.equal(target.cappedAt8k, true);
+  assert.match(outputSizeNotice(target)?.message ?? "", /Capped at 8K/);
+});
+
+test("cinema 4K does not warn", () => {
+  const target = resolveOutputTarget(meta, settingsFromPreset("cinema"));
+  assert.equal(target.exceedsUhd, false);
+  assert.equal(outputSizeNotice(target), null);
 });

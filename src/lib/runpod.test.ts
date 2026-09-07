@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { gpuOutputLooksLikeBytes, isGpuConfigured, parseGpuObjectOutput, runpodConfig } from "./runpod";
+import {
+  gpuFailureMessage,
+  gpuOutputLooksLikeBytes,
+  isGpuConfigured,
+  isGpuOom,
+  parseGpuObjectOutput,
+  runpodConfig,
+} from "./runpod";
 
 test("runpodConfig reads RUNPOD_API_KEY at call time", () => {
   const previousKey = process.env.RUNPOD_API_KEY;
@@ -38,4 +45,13 @@ test("parseGpuObjectOutput reads object_key and never requires inline bytes", ()
   assert.equal(parseGpuObjectOutput({ video_path: "/ComfyUI/output/x.mp4" }), null);
   assert.equal(gpuOutputLooksLikeBytes({ video: "a".repeat(40) }), true);
   assert.equal(gpuOutputLooksLikeBytes({ object_key: "users/x/jobs/y/output.mp4" }), false);
+});
+
+test("gpuFailureMessage rewrites SeedVR2 device allocation OOMs", () => {
+  assert.equal(isGpuOom("Error in Phase 1 (Encoding): Allocation on device"), true);
+  assert.match(
+    gpuFailureMessage("torch.OutOfMemoryError: Allocation on device"),
+    /VRAM/,
+  );
+  assert.equal(gpuFailureMessage("", "FAILED"), "GPU job failed");
 });

@@ -12,6 +12,7 @@ ARG HUB_IMAGE=registry.runpod.net/wlsdml1114-upscale-interpolation-runpod-hub-ma
 FROM ${HUB_IMAGE}
 
 COPY r2_put.py /r2_put.py
+COPY vram.py /vram.py
 COPY wrap.py /opt/lumen/wrap.py
 
 RUN if [ -f /handler.py ]; then cp /handler.py /hub_handler.py; fi \
