@@ -32,6 +32,7 @@ import {
 import {
   gpuHubResolution,
   isNoOp,
+  outputSizeNotice,
   preferGpuEngine,
   resolveOutputTarget,
   type OutputTarget,
@@ -140,6 +141,15 @@ async function processJob(id: string): Promise<void> {
   }
 
   const target = resolveOutputTarget(meta, job.settings);
+  const sizeNotice = outputSizeNotice(target);
+  if (sizeNotice) {
+    await appendEvent(id, {
+      stage: "Reading source",
+      message: sizeNotice.message,
+      progress: 6,
+      level: "warn",
+    });
+  }
   const preferGpu = preferGpuEngine({
     enginePreference: job.settings.enginePreference,
     gpuConfigured: isGpuConfigured() && r2Enabled(),
