@@ -1,3 +1,5 @@
+// Browser-only upload helper. Uses fetch against presigned URLs.
+// Do not import @aws-sdk here — the S3 client stays on the server.
 export async function putBlobToUrl(
   url: string,
   body: Blob,

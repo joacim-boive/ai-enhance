@@ -1,7 +1,6 @@
 import { connection, NextResponse } from "next/server";
-import { blobEnabled, hostEnvironment, isVercel } from "@/lib/env";
+import { blobEnabled, hostEnvironment, isVercel, r2Enabled } from "@/lib/env";
 import { ffmpegVersion } from "@/lib/probe";
-import { r2Enabled } from "@/lib/r2";
 import { gpuHealth } from "@/lib/runpod";
 import { sessionSecretConfigured } from "@/lib/session";
 import type { HealthStatus } from "@/lib/types";

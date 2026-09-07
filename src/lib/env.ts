@@ -28,6 +28,15 @@ export function blobEnabled(): boolean {
   return Boolean(runtimeEnv("BLOB_READ_WRITE_TOKEN") || runtimeEnv("BLOB_STORE_ID"));
 }
 
+export function r2Enabled(): boolean {
+  return Boolean(
+    runtimeEnv("R2_ACCOUNT_ID") &&
+      runtimeEnv("R2_ACCESS_KEY_ID") &&
+      runtimeEnv("R2_SECRET_ACCESS_KEY") &&
+      runtimeEnv("R2_BUCKET_NAME"),
+  );
+}
+
 export function missingGpuKeyMessage(environment: HostEnvironment = hostEnvironment()): string {
   if (environment === "preview") {
     return "RUNPOD_API_KEY is missing on this Preview deployment. In Vercel → Settings → Environment Variables, enable it for Preview (not only Production), then Redeploy.";

@@ -1,3 +1,4 @@
+import "server-only";
 import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
 import {
@@ -15,7 +16,7 @@ import {
 } from "@aws-sdk/client-s3";
 import { Upload } from "@aws-sdk/lib-storage";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import { runtimeEnv } from "./env";
+import { runtimeEnv, r2Enabled } from "./env";
 
 const PUT_EXPIRES_SEC = 6 * 60 * 60;
 const GET_EXPIRES_SEC = 15 * 60;
@@ -46,14 +47,7 @@ export type OutputUploadGrant = {
 
 let corsApplied = false;
 
-export function r2Enabled(): boolean {
-  return Boolean(
-    runtimeEnv("R2_ACCOUNT_ID") &&
-      runtimeEnv("R2_ACCESS_KEY_ID") &&
-      runtimeEnv("R2_SECRET_ACCESS_KEY") &&
-      runtimeEnv("R2_BUCKET_NAME"),
-  );
-}
+export { r2Enabled };
 
 function requireR2(): { client: S3Client; bucket: string } {
   if (!r2Enabled()) {

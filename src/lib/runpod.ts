@@ -1,5 +1,4 @@
-import { missingGpuKeyMessage, runtimeEnv } from "./env";
-import { r2Enabled } from "./r2";
+import { missingGpuKeyMessage, r2Enabled, runtimeEnv } from "./env";
 import type { HealthStatus } from "./types";
 
 const DEFAULT_ENDPOINT = "tbsk82cmm6azwh";
