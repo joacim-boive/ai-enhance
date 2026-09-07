@@ -46,6 +46,7 @@ export type OutputUploadGrant = {
 };
 
 let corsApplied = false;
+let corsTried = false;
 
 export { r2Enabled };
 
@@ -80,34 +81,44 @@ function r2Client(): S3Client {
   });
 }
 
-export async function ensureR2Cors(): Promise<void> {
+export async function ensureR2Cors(): Promise<boolean> {
   if (!r2Enabled() || corsApplied) {
-    return;
+    return corsApplied;
   }
-  const { client, bucket } = requireR2();
-  await client.send(
-    new PutBucketCorsCommand({
-      Bucket: bucket,
-      CORSConfiguration: {
-        CORSRules: [
-          {
-            AllowedHeaders: ["*"],
-            AllowedMethods: ["GET", "PUT", "HEAD"],
-            AllowedOrigins: ["*"],
-            ExposeHeaders: ["ETag", "Content-Length", "Content-Type"],
-            MaxAgeSeconds: 3600,
-          },
-        ],
-      },
-    }),
-  );
-  corsApplied = true;
+  if (corsTried) {
+    return false;
+  }
+  corsTried = true;
+  try {
+    const { client, bucket } = requireR2();
+    await client.send(
+      new PutBucketCorsCommand({
+        Bucket: bucket,
+        CORSConfiguration: {
+          CORSRules: [
+            {
+              AllowedHeaders: ["*"],
+              AllowedMethods: ["GET", "PUT", "HEAD"],
+              AllowedOrigins: ["*"],
+              ExposeHeaders: ["ETag", "Content-Length", "Content-Type"],
+              MaxAgeSeconds: 3600,
+            },
+          ],
+        },
+      }),
+    );
+    corsApplied = true;
+    return true;
+  } catch {
+    // Object Read & Write tokens cannot change bucket CORS. Browser PUTs still
+    // work if the bucket already has a CORS rule for PUT/GET/HEAD + ETag.
+    return false;
+  }
 }
 
 export async function presignPutUrl(objectKey: string, contentType: string): Promise<string> {
   const { client, bucket } = requireR2();
-  await ensureR2Cors();
-  return getSignedUrl(
+  const url = await getSignedUrl(
     client,
     new PutObjectCommand({
       Bucket: bucket,
@@ -116,6 +127,8 @@ export async function presignPutUrl(objectKey: string, contentType: string): Pro
     }),
     { expiresIn: PUT_EXPIRES_SEC },
   );
+  void ensureR2Cors();
+  return url;
 }
 
 export async function presignGetUrl(
@@ -141,7 +154,6 @@ export async function createOutputUploadGrant(input: {
   contentType: string;
 }): Promise<OutputUploadGrant> {
   const { client, bucket } = requireR2();
-  await ensureR2Cors();
   const putUrl = await presignPutUrl(input.objectKey, input.contentType);
   const created = await client.send(
     new CreateMultipartUploadCommand({

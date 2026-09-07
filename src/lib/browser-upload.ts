@@ -5,11 +5,18 @@ export async function putBlobToUrl(
   body: Blob,
   contentType: string,
 ): Promise<string | null> {
-  const response = await fetch(url, {
-    method: "PUT",
-    body,
-    headers: { "Content-Type": contentType },
-  });
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: "PUT",
+      body,
+      headers: { "Content-Type": contentType },
+    });
+  } catch {
+    throw new Error(
+      "Browser could not reach R2. Add a CORS rule on the bucket allowing GET, PUT, and HEAD from *, and expose ETag.",
+    );
+  }
   if (!response.ok) {
     throw new Error(`Upload failed (${response.status})`);
   }

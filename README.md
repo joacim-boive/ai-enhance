@@ -34,6 +34,20 @@ SESSION_SECRET=...
 
 Optional: `R2_JURISDICTION=eu` if the bucket uses a jurisdiction endpoint.
 
+The R2 API token only needs **Object Read & Write** on that bucket. Browser uploads PUT straight to a presigned URL, so the bucket also needs CORS. If the token cannot call `PutBucketCors`, add this rule in R2 → bucket → Settings → CORS:
+
+```json
+[
+  {
+    "AllowedOrigins": ["*"],
+    "AllowedMethods": ["GET", "PUT", "HEAD"],
+    "AllowedHeaders": ["*"],
+    "ExposeHeaders": ["ETag", "Content-Length", "Content-Type"],
+    "MaxAgeSeconds": 3600
+  }
+]
+```
+
 The header shows **GPU unset** when that deployment cannot read `RUNPOD_API_KEY`, and **R2 unset** when private storage is missing. Adding variables only to Production leaves Preview unset. After changing env vars, Vercel does not patch a live deployment — create a new one.
 
 The GPU worker **never** receives R2 secrets. On submit the app mints a presigned PUT (and multipart part URLs for files above ~5 GB) for that one key and content type, valid a few hours. The worker streams `/ComfyUI/output/….mp4` to R2 and returns `{ object_key, byte_size, etag }`. The app HEADs the object and marks the job complete.

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { uploadBrowserFile } from "@/lib/browser-upload";
+import { readJsonResponse } from "@/lib/http";
 import { DEFAULT_SETTINGS } from "@/lib/settings";
 import type { HealthStatus, JobSettings, PublicJob, Toast, VideoMeta } from "@/lib/types";
 import { AppHeader } from "./app-header";
@@ -107,7 +108,7 @@ export function StudioApp() {
       if (!response.ok) {
         return;
       }
-      const data = (await response.json()) as { job: PublicJob };
+      const data = await readJsonResponse<{ job: PublicJob }>(response);
       setJob(data.job);
       if (
         repeat &&
@@ -173,7 +174,7 @@ export function StudioApp() {
     setJob(null);
     try {
       const response = await fetch("/api/sample", { method: "POST" });
-      const data = (await response.json()) as UploadedFile & { error?: string };
+      const data = await readJsonResponse<UploadedFile & { error?: string }>(response);
       if (!response.ok) {
         throw new Error(data.error || "Sample failed");
       }
@@ -216,7 +217,7 @@ export function StudioApp() {
           settings: jobSettings,
         }),
       });
-      const data = (await response.json()) as { job?: PublicJob; error?: string };
+      const data = await readJsonResponse<{ job?: PublicJob; error?: string }>(response);
       if (!response.ok || !data.job) {
         throw new Error(data.error || "Could not start the job");
       }
@@ -252,7 +253,7 @@ export function StudioApp() {
       return;
     }
     const response = await fetch(`/api/jobs/${job.id}/retry`, { method: "POST" });
-    const data = (await response.json()) as { job?: PublicJob };
+    const data = await readJsonResponse<{ job?: PublicJob }>(response);
     if (data.job) {
       setJob(data.job);
     }
@@ -337,7 +338,7 @@ function notifyBrowser(title: string, body: string) {
 async function fetchHealth(): Promise<HealthStatus | null> {
   try {
     const response = await fetch("/api/health", { cache: "no-store" });
-    return (await response.json()) as HealthStatus;
+    return await readJsonResponse<HealthStatus>(response);
   } catch {
     return null;
   }
@@ -364,7 +365,7 @@ async function uploadViaR2(input: File): Promise<UploadedFile> {
       contentType: input.type || "video/mp4",
     }),
   });
-  const token = (await tokenResponse.json()) as {
+  const token = await readJsonResponse<{
     fileId?: string;
     objectKey?: string;
     contentType?: string;
@@ -375,7 +376,7 @@ async function uploadViaR2(input: File): Promise<UploadedFile> {
       partUrls: string[];
     } | null;
     error?: string;
-  };
+  }>(tokenResponse);
   if (!tokenResponse.ok || !token.fileId || !token.objectKey || !token.putUrl) {
     throw new Error(token.error || "Could not mint a private upload URL");
   }
@@ -396,7 +397,7 @@ async function uploadViaR2(input: File): Promise<UploadedFile> {
       parts: uploaded.parts,
     }),
   });
-  const data = (await response.json()) as UploadedFile & { error?: string };
+  const data = await readJsonResponse<UploadedFile & { error?: string }>(response);
   if (!response.ok) {
     throw new Error(data.error || "Could not probe that clip");
   }
@@ -407,7 +408,7 @@ async function uploadViaForm(input: File): Promise<UploadedFile> {
   const body = new FormData();
   body.append("file", input);
   const response = await fetch("/api/upload", { method: "POST", body });
-  const data = (await response.json()) as UploadedFile & { error?: string };
+  const data = await readJsonResponse<UploadedFile & { error?: string }>(response);
   if (!response.ok) {
     throw new Error(data.error || "Upload failed");
   }
