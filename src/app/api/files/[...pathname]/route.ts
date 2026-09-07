@@ -1,8 +1,7 @@
 import path from "node:path";
 import { localPathFor } from "@/lib/storage";
 import { streamLocalFile } from "@/lib/stream-file";
-import { blobEnabled } from "@/lib/env";
-import { r2Enabled } from "@/lib/r2";
+import { blobEnabled, r2Enabled } from "@/lib/env";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

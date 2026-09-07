@@ -1,10 +1,9 @@
 import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/authz";
-import { isVercel, missingR2Message } from "@/lib/env";
+import { isVercel, missingR2Message, r2Enabled } from "@/lib/env";
 import { createJob, listJobs, toPublicJob } from "@/lib/jobs";
 import { jobOutputKey, mediaJobUrl } from "@/lib/keys";
 import { startJob } from "@/lib/processor";
-import { r2Enabled } from "@/lib/r2";
 import { sessionSecretConfigured } from "@/lib/session";
 import { DEFAULT_SETTINGS } from "@/lib/settings";
 import { loadStoredFile } from "@/lib/storage";

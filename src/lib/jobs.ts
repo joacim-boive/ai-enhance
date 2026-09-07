@@ -5,7 +5,8 @@ import {
   jobRecordKey,
   parseJobIdFromRecordKey,
 } from "./keys";
-import { getJsonObject, listObjectKeys, putJsonObject, r2Enabled } from "./r2";
+import { r2Enabled } from "./env";
+import { getJsonObject, listObjectKeys, putJsonObject } from "./r2";
 import { listPathnames, readJson, saveJson } from "./storage";
 import type { Job, JobEvent, JobEventLevel, PublicJob } from "./types";
 

@@ -2,10 +2,10 @@ import { createReadStream } from "node:fs";
 import { copyFile, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { get, list, put } from "@vercel/blob";
-import { blobEnabled } from "./env";
+import { blobEnabled, r2Enabled } from "./env";
 import { uploadRecordKey } from "./keys";
 import { DATA_DIR, ensureDirs } from "./paths";
-import { getJsonObject, putJsonObject, r2Enabled } from "./r2";
+import { getJsonObject, putJsonObject } from "./r2";
 import { SAMPLE_FILE_ID, SAMPLE_STORED_FILE } from "./sample";
 
 export type StoredFile = {

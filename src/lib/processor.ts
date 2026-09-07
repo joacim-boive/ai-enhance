@@ -1,6 +1,6 @@
 import { unlink } from "node:fs/promises";
 import { after } from "next/server";
-import { absoluteUrl, isVercel } from "./env";
+import { absoluteUrl, isVercel, r2Enabled } from "./env";
 import { enhanceVideo } from "./ffmpeg";
 import {
   appendEvent,
@@ -18,7 +18,6 @@ import {
   GPU_URL_EXPIRES_SEC,
   headObject,
   presignGetUrl,
-  r2Enabled,
   uploadFileToR2,
 } from "./r2";
 import {

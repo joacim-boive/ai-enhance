@@ -2,8 +2,7 @@ import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/authz";
 import { ingestR2Video } from "@/lib/ingest";
 import { ownsObjectKey } from "@/lib/keys";
-import { r2Enabled } from "@/lib/r2";
-import { missingR2Message } from "@/lib/env";
+import { missingR2Message, r2Enabled } from "@/lib/env";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
