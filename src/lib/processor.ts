@@ -70,7 +70,7 @@ async function processJob(id: string): Promise<void> {
   });
 
   const meta = await probeVideo(job.sourcePath);
-  const thumbs = await extractThumbnails(job.sourcePath, id);
+  const thumbs = await extractThumbnails(job.sourcePath, id, 8, meta.durationSec);
   await patchJob(id, { sourceMeta: meta, thumbs });
 
   if (isNoOp(meta, job.settings)) {

@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdir } from "node:fs/promises";
+import { mkdir, readdir } from "node:fs/promises";
 import path from "node:path";
 import { parseFrameRate } from "./format";
 import { thumbDir } from "./paths";
@@ -86,30 +86,32 @@ export async function extractThumbnails(
   filePath: string,
   jobId: string,
   count = 8,
+  durationSec = 3,
 ): Promise<string[]> {
   const dir = thumbDir(jobId);
   await mkdir(dir, { recursive: true });
   const pattern = path.join(dir, "frame-%02d.jpg");
+  const span = Math.max(durationSec, 1);
   try {
     await run("ffmpeg", [
       "-y",
       "-i",
       filePath,
       "-vf",
-      `fps=8/${Math.max(count, 1)},scale=240:-2`,
+      `fps=${count}/${span},scale=240:-2`,
       "-frames:v",
       String(count),
       "-q:v",
       "4",
       pattern,
     ]);
+    const files = (await readdir(dir))
+      .filter((file) => file.endsWith(".jpg"))
+      .sort();
+    return files.map((file) => `/api/media/${jobId}/thumb/${file}`);
   } catch {
     return [];
   }
-  return Array.from({ length: count }, (_, index) => {
-    const name = `frame-${String(index + 1).padStart(2, "0")}.jpg`;
-    return `/api/media/${jobId}/thumb/${name}`;
-  });
 }
 
 export async function ffmpegVersion(): Promise<string | null> {

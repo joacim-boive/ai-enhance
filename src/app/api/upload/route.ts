@@ -39,7 +39,7 @@ export async function POST(request: Request): Promise<Response> {
   try {
     await pipeline(nodeStream, createWriteStream(dest));
     const meta = await probeVideo(dest);
-    const thumbs = await extractThumbnails(dest, id);
+    const thumbs = await extractThumbnails(dest, id, 8, meta.durationSec);
     return NextResponse.json({
       id,
       name: file.name,

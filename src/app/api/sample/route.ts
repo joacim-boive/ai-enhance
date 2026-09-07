@@ -49,7 +49,7 @@ export async function POST(): Promise<Response> {
       dest,
     ]);
     const meta = await probeVideo(dest);
-    const thumbs = await extractThumbnails(dest, id);
+    const thumbs = await extractThumbnails(dest, id, 8, meta.durationSec);
     return NextResponse.json({
       id,
       name: "sample-24fps.mp4",

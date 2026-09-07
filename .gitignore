@@ -44,3 +44,8 @@ next-env.d.ts
 # app data
 .data/
 uploads/
+
+# generated agent stubs
+AGENTS.md
+CLAUDE.md
+
