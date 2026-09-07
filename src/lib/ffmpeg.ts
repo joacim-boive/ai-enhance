@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { ffmpegBin } from "./binaries";
 import { ffmpegArgs, buildVideoFilters } from "./ffmpeg-graph";
 import { resolveOutputTarget } from "./settings";
 import type { JobSettings, VideoMeta } from "./types";
@@ -59,7 +60,7 @@ export async function enhanceVideo(input: EnhanceVideoInput): Promise<void> {
   });
 
   await new Promise<void>((resolve, reject) => {
-    const child = spawn("ffmpeg", args, { stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(ffmpegBin(), args, { stdio: ["ignore", "pipe", "pipe"] });
     running.set(input.outputPath, child);
     let stderr = "";
 

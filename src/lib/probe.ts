@@ -1,8 +1,10 @@
 import { spawn } from "node:child_process";
-import { mkdir, readdir } from "node:fs/promises";
+import { mkdir, readFile, readdir } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
+import { ffmpegBin, ffprobeBin } from "./binaries";
 import { parseFrameRate } from "./format";
-import { thumbDir } from "./paths";
+import { saveBytes } from "./storage";
 import type { VideoMeta } from "./types";
 
 type FfprobeStream = {
@@ -50,7 +52,7 @@ function run(command: string, args: string[]): Promise<{ stdout: string; stderr:
 }
 
 export async function probeVideo(filePath: string): Promise<VideoMeta> {
-  const { stdout } = await run("ffprobe", [
+  const { stdout } = await run(ffprobeBin(), [
     "-v",
     "error",
     "-print_format",
@@ -88,12 +90,12 @@ export async function extractThumbnails(
   count = 8,
   durationSec = 3,
 ): Promise<string[]> {
-  const dir = thumbDir(jobId);
+  const dir = path.join(os.tmpdir(), `thumbs-${jobId}`);
   await mkdir(dir, { recursive: true });
   const pattern = path.join(dir, "frame-%02d.jpg");
   const span = Math.max(durationSec, 1);
   try {
-    await run("ffmpeg", [
+    await run(ffmpegBin(), [
       "-y",
       "-i",
       filePath,
@@ -108,7 +110,12 @@ export async function extractThumbnails(
     const files = (await readdir(dir))
       .filter((file) => file.endsWith(".jpg"))
       .sort();
-    return files.map((file) => `/api/media/${jobId}/thumb/${file}`);
+    const urls: string[] = [];
+    for (const file of files) {
+      const bytes = await readFile(path.join(dir, file));
+      urls.push(await saveBytes(`thumbs/${jobId}/${file}`, bytes, "image/jpeg"));
+    }
+    return urls;
   } catch {
     return [];
   }
@@ -116,7 +123,7 @@ export async function extractThumbnails(
 
 export async function ffmpegVersion(): Promise<string | null> {
   try {
-    const { stderr, stdout } = await run("ffmpeg", ["-version"]);
+    const { stderr, stdout } = await run(ffmpegBin(), ["-version"]);
     const text = stdout || stderr;
     const match = text.match(/ffmpeg version ([^\s]+)/);
     return match?.[1] ?? null;

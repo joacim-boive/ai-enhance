@@ -41,16 +41,23 @@ export function ffmpegArgs(options: {
   hasAudio: boolean;
   crf?: number;
 }): string[] {
-  const args = [
-    "-y",
-    "-hide_banner",
-    "-fflags",
-    "+genpts",
-    "-i",
-    options.inputPath,
-    "-map",
-    "0:v:0",
-  ];
+  const args: string[] = ["-y", "-hide_banner"];
+  if (
+    options.inputPath.startsWith("http://") ||
+    options.inputPath.startsWith("https://")
+  ) {
+    args.push(
+      "-protocol_whitelist",
+      "file,http,https,tcp,tls,crypto",
+      "-reconnect",
+      "1",
+      "-reconnect_streamed",
+      "1",
+      "-reconnect_delay_max",
+      "2",
+    );
+  }
+  args.push("-fflags", "+genpts", "-i", options.inputPath, "-map", "0:v:0");
   if (options.filters) {
     args.push("-vf", options.filters);
   }

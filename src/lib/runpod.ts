@@ -138,26 +138,34 @@ export async function submitGpuJob(input: {
   return data.id;
 }
 
-export async function pollGpuJob(
-  jobId: string,
-  signal: AbortSignal,
-): Promise<unknown> {
+export async function getGpuJobStatus(runpodJobId: string): Promise<RunpodStatusResponse> {
   const { apiKey, endpointId } = runpodConfig();
   if (!apiKey) {
     throw new Error("GPU is not configured");
   }
+  const response = await fetch(
+    `https://api.runpod.ai/v2/${endpointId}/status/${runpodJobId}`,
+    {
+      headers: { Authorization: `Bearer ${apiKey}` },
+      cache: "no-store",
+    },
+  );
+  const data = (await response.json()) as RunpodStatusResponse;
+  if (!response.ok) {
+    throw new Error(data.error || `Runpod status failed (${response.status})`);
+  }
+  return data;
+}
+
+export async function pollGpuJob(
+  jobId: string,
+  signal: AbortSignal,
+): Promise<unknown> {
+  if (!runpodConfig().apiKey) {
+    throw new Error("GPU is not configured");
+  }
   while (!signal.aborted) {
-    const response = await fetch(
-      `https://api.runpod.ai/v2/${endpointId}/status/${jobId}`,
-      {
-        headers: { Authorization: `Bearer ${apiKey}` },
-        cache: "no-store",
-      },
-    );
-    const data = (await response.json()) as RunpodStatusResponse;
-    if (!response.ok) {
-      throw new Error(data.error || `Runpod status failed (${response.status})`);
-    }
+    const data = await getGpuJobStatus(jobId);
     if (data.status === "COMPLETED") {
       return data.output;
     }
@@ -182,6 +190,39 @@ export async function cancelGpuJob(runpodJobId: string): Promise<void> {
     method: "POST",
     headers: { Authorization: `Bearer ${apiKey}` },
   }).catch(() => undefined);
+}
+
+export function extractRemoteVideoUrl(output: unknown): string | null {
+  if (!output || typeof output !== "object") {
+    return null;
+  }
+  const record = output as Record<string, unknown>;
+  const nested =
+    record.output && typeof record.output === "object"
+      ? (record.output as Record<string, unknown>)
+      : record;
+  for (const value of [nested.video_url, nested.url, nested.output_url, nested.path]) {
+    if (typeof value === "string" && /^https?:\/\//i.test(value)) {
+      return value;
+    }
+  }
+  return null;
+}
+
+export async function materializeGpuOutput(output: unknown): Promise<Buffer> {
+  const inline = extractVideoPayload(output);
+  if (inline) {
+    return inline;
+  }
+  const remote = extractRemoteVideoUrl(output);
+  if (!remote) {
+    throw new Error("GPU finished but did not return a video payload");
+  }
+  const response = await fetch(remote);
+  if (!response.ok) {
+    throw new Error(`GPU output download failed (${response.status})`);
+  }
+  return Buffer.from(await response.arrayBuffer());
 }
 
 export function extractVideoPayload(output: unknown): Buffer | null {

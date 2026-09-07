@@ -1,5 +1,10 @@
-import { copyFile, readFile, writeFile } from "node:fs/promises";
+import { unlink } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { after } from "next/server";
+import { absoluteUrl, isVercel } from "./env";
 import { enhanceVideo } from "./ffmpeg";
+import { writeTempFile } from "./ingest";
 import {
   appendEvent,
   clearAbortController,
@@ -7,21 +12,41 @@ import {
   loadJob,
   patchJob,
 } from "./jobs";
-import { outputPath } from "./paths";
 import { extractThumbnails, probeVideo } from "./probe";
 import {
   cancelGpuJob,
-  extractVideoPayload,
+  getGpuJobStatus,
   GPU_BASE64_LIMIT,
   isGpuConfigured,
+  materializeGpuOutput,
   pollGpuJob,
   submitGpuJob,
 } from "./runpod";
 import { isNoOp, resolveOutputTarget } from "./settings";
+import { contentTypeForName, localPathFor, saveFromPath } from "./storage";
 import type { Engine, Job } from "./types";
+import { isHttpUrl } from "./url";
 
 const queue: string[] = [];
 let draining = false;
+
+export function startJob(id: string): void {
+  if (isVercel()) {
+    after(() => processJobSafe(id));
+    return;
+  }
+  enqueueJob(id);
+}
+
+export async function processJobSafe(id: string): Promise<void> {
+  try {
+    await processJob(id);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown error";
+    console.error(`Job ${id} failed`, error);
+    await failJob(id, message);
+  }
+}
 
 export function enqueueJob(id: string): void {
   if (!queue.includes(id)) {
@@ -40,19 +65,24 @@ async function drain(): Promise<void> {
     if (!id) {
       continue;
     }
-    try {
-      await processJob(id);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Unknown error";
-      await failJob(id, message);
-    }
+    await processJobSafe(id);
   }
   draining = false;
 }
 
+function sourceInput(job: Job): string {
+  if (isHttpUrl(job.sourceUrl)) {
+    return job.sourceUrl;
+  }
+  if (job.sourcePath.startsWith("/") && !job.sourcePath.startsWith("/api/")) {
+    return job.sourcePath;
+  }
+  return localPathFor(job.sourcePath);
+}
+
 async function processJob(id: string): Promise<void> {
   const job = await loadJob(id);
-  if (!job || job.status === "cancelled") {
+  if (!job || job.status === "cancelled" || job.status === "complete") {
     return;
   }
   const controller = getAbortController(id);
@@ -69,13 +99,15 @@ async function processJob(id: string): Promise<void> {
     level: "info",
   });
 
-  const meta = await probeVideo(job.sourcePath);
-  const thumbs = await extractThumbnails(job.sourcePath, id, 8, meta.durationSec);
+  const input = sourceInput(job);
+  const meta = await probeVideo(input);
+  const thumbs = await extractThumbnails(input, id, 8, meta.durationSec);
   await patchJob(id, { sourceMeta: meta, thumbs });
 
   if (isNoOp(meta, job.settings)) {
-    await copyFile(job.sourcePath, outputPath(id));
-    await completeJob(id, "cpu", "Nothing to change — returning the original master.");
+    await completeJob(id, "cpu", "Nothing to change — returning the original master.", null, {
+      reuseSource: true,
+    });
     return;
   }
 
@@ -97,6 +129,10 @@ async function processJob(id: string): Promise<void> {
         await patchJob(id, { status: "cancelled", stage: "Cancelled", error: "Cancelled" });
         return;
       }
+      const latest = await loadJob(id);
+      if (latest?.status === "complete") {
+        return;
+      }
       const reason = error instanceof Error ? error.message : "GPU failed";
       fallbackReason = reason;
       await appendEvent(id, {
@@ -105,7 +141,7 @@ async function processJob(id: string): Promise<void> {
         progress: job.progress,
         level: "warn",
       });
-      await runCpu(id, job.sourcePath, meta, job.settings, controller.signal, "high");
+      await runCpu(id, input, meta, job.settings, controller.signal, "high");
       usedEngine = "cpu";
     }
   } else {
@@ -119,7 +155,7 @@ async function processJob(id: string): Promise<void> {
       });
     }
     try {
-      await runCpu(id, job.sourcePath, meta, job.settings, controller.signal, "high");
+      await runCpu(id, input, meta, job.settings, controller.signal, "high");
     } catch (error) {
       if (controller.signal.aborted) {
         await patchJob(id, { status: "cancelled", stage: "Cancelled", error: "Cancelled" });
@@ -133,7 +169,7 @@ async function processJob(id: string): Promise<void> {
         level: "warn",
       });
       fallbackReason = reason;
-      await runCpu(id, job.sourcePath, meta, job.settings, controller.signal, "fast");
+      await runCpu(id, input, meta, job.settings, controller.signal, "fast");
     }
   }
 
@@ -158,19 +194,22 @@ async function runGpu(
     level: "info",
   });
 
-  const publicBase = process.env.PUBLIC_BASE_URL?.replace(/\/$/, "") ?? "";
+  const publicSource = isHttpUrl(job.sourceUrl)
+    ? job.sourceUrl
+    : absoluteUrl(job.sourceUrl);
   const sourceSize = job.sourceMeta?.sizeBytes ?? 0;
   let videoUrl: string | undefined;
   let videoBase64: string | undefined;
 
-  if (publicBase) {
-    videoUrl = `${publicBase}${job.sourceUrl}`;
+  if (isHttpUrl(publicSource)) {
+    videoUrl = publicSource;
   } else if (sourceSize > 0 && sourceSize <= GPU_BASE64_LIMIT) {
-    const buf = await readFile(job.sourcePath);
+    const { readFile } = await import("node:fs/promises");
+    const buf = await readFile(sourceInput(job));
     videoBase64 = `data:video/mp4;base64,${buf.toString("base64")}`;
   } else {
     throw new Error(
-      "Clip is too large for inline GPU upload. Set PUBLIC_BASE_URL or use a smaller file.",
+      "Clip is too large for inline GPU upload. Connect Vercel Blob or set PUBLIC_BASE_URL.",
     );
   }
 
@@ -201,11 +240,9 @@ async function runGpu(
     signal.addEventListener("abort", onAbort, { once: true });
     const output = await pollGpuJob(runpodJobId, signal);
     signal.removeEventListener("abort", onAbort);
-    const payload = extractVideoPayload(output);
-    if (!payload) {
-      throw new Error("GPU finished but did not return a video payload");
-    }
-    await writeFile(outputPath(job.id), payload);
+    const payload = await materializeGpuOutput(output);
+    const tmp = await writeTempFile(`${job.id}-gpu.mp4`, payload);
+    await persistOutput(job.id, tmp, job.name);
     return "gpu";
   } finally {
     clearInterval(pulse);
@@ -239,7 +276,7 @@ async function runCpu(
     level: quality === "high" ? "info" : "warn",
   });
 
-  const dest = outputPath(id);
+  const dest = path.join(os.tmpdir(), `${id}-out.mp4`);
   await enhanceVideo({
     inputPath: sourcePath,
     outputPath: dest,
@@ -256,6 +293,17 @@ async function runCpu(
       });
     },
   });
+  await persistOutput(id, dest, "enhanced.mp4");
+}
+
+async function persistOutput(id: string, localPath: string, name: string): Promise<string> {
+  const url = await saveFromPath(`outputs/${id}.mp4`, localPath, contentTypeForName(name));
+  await unlink(localPath).catch(() => undefined);
+  await patchJob(id, {
+    outputPath: `outputs/${id}.mp4`,
+    outputUrl: url,
+  });
+  return url;
 }
 
 function estimateEta(durationSec: number, ratio: number): number | null {
@@ -271,13 +319,27 @@ async function completeJob(
   engine: Engine,
   message: string | null,
   fallbackReason: string | null = null,
+  options?: { reuseSource?: boolean },
 ): Promise<void> {
-  const dest = outputPath(id);
-  let outputMeta = null;
-  try {
-    outputMeta = await probeVideo(dest);
-  } catch {
-    outputMeta = null;
+  const current = await loadJob(id);
+  if (!current || current.status === "complete" || current.status === "cancelled") {
+    return;
+  }
+  let outputUrl = current.outputUrl;
+  let outputPath = current.outputPath;
+  let outputMeta = current.outputMeta;
+  if (options?.reuseSource) {
+    outputUrl = current.sourceUrl;
+    outputPath = current.sourcePath;
+    outputMeta = current.sourceMeta;
+  } else if (outputPath) {
+    try {
+      outputMeta = await probeVideo(
+        isHttpUrl(outputUrl ?? "") ? (outputUrl as string) : localPathFor(outputPath),
+      );
+    } catch {
+      outputMeta = outputMeta ?? null;
+    }
   }
   await patchJob(id, {
     status: "complete",
@@ -285,8 +347,8 @@ async function completeJob(
     stage: "Ready",
     progress: 100,
     etaSec: 0,
-    outputPath: dest,
-    outputUrl: `/api/media/${id}/output`,
+    outputPath,
+    outputUrl,
     outputMeta,
     completedAt: Date.now(),
     fallbackReason,
@@ -303,7 +365,7 @@ async function completeJob(
 
 async function failJob(id: string, message: string): Promise<void> {
   const job = await loadJob(id);
-  if (job?.status === "cancelled") {
+  if (job?.status === "cancelled" || job?.status === "complete") {
     return;
   }
   await patchJob(id, {
@@ -319,4 +381,31 @@ async function failJob(id: string, message: string): Promise<void> {
     level: "error",
   });
   clearAbortController(id);
+}
+
+export async function resumeGpuJob(id: string): Promise<void> {
+  const job = await loadJob(id);
+  if (
+    !job?.runpodJobId ||
+    job.status === "complete" ||
+    job.status === "failed" ||
+    job.status === "cancelled"
+  ) {
+    return;
+  }
+  if (job.engine !== "gpu") {
+    return;
+  }
+  try {
+    const status = await getGpuJobStatus(job.runpodJobId);
+    if (status.status !== "COMPLETED") {
+      return;
+    }
+    const payload = await materializeGpuOutput(status.output);
+    const tmp = await writeTempFile(`${job.id}-gpu.mp4`, payload);
+    await persistOutput(job.id, tmp, job.name);
+    await completeJob(id, "gpu", null, null);
+  } catch (error) {
+    console.error(`GPU resume failed for ${id}`, error);
+  }
 }

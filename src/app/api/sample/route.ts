@@ -1,10 +1,14 @@
+import { unlink } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { spawn } from "node:child_process";
 import { NextResponse } from "next/server";
-import { ensureDirs, uploadPath } from "@/lib/paths";
-import { extractThumbnails, probeVideo } from "@/lib/probe";
+import { ffmpegBin } from "@/lib/binaries";
+import { ingestLocalVideo } from "@/lib/ingest";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const maxDuration = 120;
 
 function run(command: string, args: string[]): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -25,11 +29,10 @@ function run(command: string, args: string[]): Promise<void> {
 }
 
 export async function POST(): Promise<Response> {
-  await ensureDirs();
   const id = crypto.randomUUID();
-  const dest = uploadPath(id, "sample.mp4");
+  const dest = path.join(os.tmpdir(), `${id}-sample.mp4`);
   try {
-    await run("ffmpeg", [
+    await run(ffmpegBin(), [
       "-y",
       "-f",
       "lavfi",
@@ -48,16 +51,15 @@ export async function POST(): Promise<Response> {
       "-shortest",
       dest,
     ]);
-    const meta = await probeVideo(dest);
-    const thumbs = await extractThumbnails(dest, id, 8, meta.durationSec);
-    return NextResponse.json({
+    const ingested = await ingestLocalVideo({
       id,
       name: "sample-24fps.mp4",
-      url: `/api/media/${id}/source`,
-      meta,
-      thumbs,
+      localPath: dest,
     });
+    await unlink(dest).catch(() => undefined);
+    return NextResponse.json(ingested);
   } catch (error) {
+    await unlink(dest).catch(() => undefined);
     const message = error instanceof Error ? error.message : "Could not create sample";
     return NextResponse.json({ error: message }, { status: 500 });
   }

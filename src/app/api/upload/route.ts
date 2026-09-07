@@ -1,11 +1,11 @@
 import { createWriteStream } from "node:fs";
 import { unlink } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { NextResponse } from "next/server";
-import { ensureDirs, uploadPath } from "@/lib/paths";
-import { extractThumbnails, probeVideo } from "@/lib/probe";
+import { ingestLocalVideo } from "@/lib/ingest";
 import { ACCEPTED_EXTENSIONS, MAX_UPLOAD_BYTES } from "@/lib/settings";
 
 export const runtime = "nodejs";
@@ -13,14 +13,13 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 export async function POST(request: Request): Promise<Response> {
-  await ensureDirs();
   const form = await request.formData();
   const file = form.get("file");
   if (!(file instanceof File)) {
     return NextResponse.json({ error: "Choose a video file to upload." }, { status: 400 });
   }
   const ext = path.extname(file.name).toLowerCase();
-  if (ext && !ACCEPTED_EXTENSIONS.includes(ext)) {
+  if (ext && !ACCEPTED_EXTENSIONS.includes(ext as (typeof ACCEPTED_EXTENSIONS)[number])) {
     return NextResponse.json(
       { error: "Use MP4, MOV, WebM, MKV, or AVI." },
       { status: 400 },
@@ -34,19 +33,17 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   const id = crypto.randomUUID();
-  const dest = uploadPath(id, file.name);
+  const dest = path.join(os.tmpdir(), `${id}${ext || ".mp4"}`);
   const nodeStream = Readable.fromWeb(file.stream() as never);
   try {
     await pipeline(nodeStream, createWriteStream(dest));
-    const meta = await probeVideo(dest);
-    const thumbs = await extractThumbnails(dest, id, 8, meta.durationSec);
-    return NextResponse.json({
+    const ingested = await ingestLocalVideo({
       id,
       name: file.name,
-      url: `/api/media/${id}/source`,
-      meta,
-      thumbs,
+      localPath: dest,
     });
+    await unlink(dest).catch(() => undefined);
+    return NextResponse.json(ingested);
   } catch (error) {
     await unlink(dest).catch(() => undefined);
     const message =

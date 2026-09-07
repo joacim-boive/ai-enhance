@@ -80,6 +80,8 @@ export type PublicJob = Omit<Job, "sourcePath" | "outputPath">;
 
 export type HealthStatus = {
   ffmpeg: { ok: boolean; version: string | null };
+  blob: { configured: boolean };
+  hosting: "vercel" | "local";
   gpu: {
     configured: boolean;
     endpointId: string | null;

@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
 import { createJob, listJobs, toPublicJob } from "@/lib/jobs";
-import { findUpload } from "@/lib/paths";
-import { enqueueJob } from "@/lib/processor";
+import { startJob } from "@/lib/processor";
 import { DEFAULT_SETTINGS } from "@/lib/settings";
+import { loadStoredFile } from "@/lib/storage";
 import type { Job, JobSettings } from "@/lib/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const maxDuration = 800;
 
 type CreateBody = {
   fileId?: string;
@@ -24,21 +25,21 @@ export async function POST(request: Request): Promise<Response> {
   if (!body.fileId) {
     return NextResponse.json({ error: "Missing fileId" }, { status: 400 });
   }
-  const settings: JobSettings = { ...DEFAULT_SETTINGS, ...body.settings };
-  const sourcePath = await findUpload(body.fileId);
-  if (!sourcePath) {
+  const stored = await loadStoredFile(body.fileId);
+  if (!stored) {
     return NextResponse.json({ error: "Upload not found. Drop the file again." }, { status: 404 });
   }
+  const settings: JobSettings = { ...DEFAULT_SETTINGS, ...body.settings };
   const id = crypto.randomUUID();
   const now = Date.now();
   const job: Job = {
     id,
-    name: body.name ?? "Untitled clip",
+    name: body.name ?? stored.name,
     status: "queued",
     engine: null,
     settings,
-    sourcePath,
-    sourceUrl: `/api/media/${id}/source`,
+    sourcePath: stored.pathname,
+    sourceUrl: stored.url,
     outputPath: null,
     outputUrl: null,
     sourceMeta: null,
@@ -66,6 +67,6 @@ export async function POST(request: Request): Promise<Response> {
     startedAt: null,
   };
   await createJob(job);
-  enqueueJob(id);
+  startJob(id);
   return NextResponse.json({ job: toPublicJob(job) }, { status: 201 });
 }

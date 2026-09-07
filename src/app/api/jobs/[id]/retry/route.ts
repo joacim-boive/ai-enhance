@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import { appendEvent, loadJob, patchJob, toPublicJob } from "@/lib/jobs";
-import { enqueueJob } from "@/lib/processor";
+import { startJob } from "@/lib/processor";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const maxDuration = 800;
 
 type RouteContext = {
   params: Promise<{ id: string }>;
@@ -39,7 +40,7 @@ export async function POST(
     progress: 1,
     level: "info",
   });
-  enqueueJob(id);
+  startJob(id);
   const latest = next ?? (await loadJob(id));
   return NextResponse.json({ job: latest ? toPublicJob(latest) : toPublicJob(job) });
 }

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { formatDuration, formatFps, formatResolution } from "@/lib/format";
+import { withDownloadParam } from "@/lib/url";
 import { engineLabel } from "@/lib/settings";
 import type { PublicJob } from "@/lib/types";
 
@@ -25,7 +26,7 @@ export function LibraryView() {
     <section className="rise">
       <h1 className="font-serif text-4xl tracking-tight">Library</h1>
       <p className="mt-2 text-sm text-[var(--muted)]">
-        Every enhancement stays on this machine until you clear the workspace.
+        Finished masters from this studio. On Vercel they live in Blob storage.
       </p>
       {error ? <p className="mt-6 text-[var(--err)]">{error}</p> : null}
       {jobs.length === 0 && !error ? (
@@ -54,7 +55,7 @@ export function LibraryView() {
                 </p>
                 {job.outputUrl ? (
                   <a
-                    href={`${job.outputUrl}?download=1`}
+                    href={withDownloadParam(job.outputUrl)}
                     className="mt-3 inline-block text-xs uppercase tracking-[0.16em] text-[var(--gold)]"
                   >
                     Download

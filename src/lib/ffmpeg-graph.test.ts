@@ -34,6 +34,17 @@ test("fast fallback uses blend interpolation", () => {
   assert.equal(graph, "minterpolate=fps=60:mi_mode=blend");
 });
 
+test("ffmpeg args enable http reconnect for remote inputs", () => {
+  const args = ffmpegArgs({
+    inputPath: "https://blob.example/video.mp4",
+    outputPath: "out.mp4",
+    filters: "",
+    hasAudio: false,
+  });
+  assert.ok(args.includes("-protocol_whitelist"));
+  assert.ok(args.includes("-reconnect"));
+});
+
 test("ffmpeg args map audio when present", () => {
   const args = ffmpegArgs({
     inputPath: "in.mp4",

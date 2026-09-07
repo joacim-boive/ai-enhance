@@ -1,7 +1,8 @@
 "use client";
 
+import { upload } from "@vercel/blob/client";
 import { useEffect, useRef, useState } from "react";
-import { DEFAULT_SETTINGS } from "@/lib/settings";
+import { ACCEPTED_EXTENSIONS, DEFAULT_SETTINGS } from "@/lib/settings";
 import type { HealthStatus, JobSettings, PublicJob, Toast, VideoMeta } from "@/lib/types";
 import { AppHeader } from "./app-header";
 import { ComparisonViewer } from "./comparison-viewer";
@@ -47,10 +48,15 @@ export function StudioApp() {
     };
     source.onerror = () => {
       source.close();
-      void pollJob(job.id);
     };
-    return () => source.close();
-    // Subscribe once per job id; status updates arrive through the stream.
+    const timer = window.setInterval(() => {
+      void pollJob(job.id, false);
+    }, 2000);
+    return () => {
+      source.close();
+      window.clearInterval(timer);
+    };
+    // Subscribe once per job id; status updates arrive through the stream and poll.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [job?.id]);
 
@@ -89,16 +95,12 @@ export function StudioApp() {
   }, [job]);
 
   async function refreshHealth() {
-    try {
-      const response = await fetch("/api/health", { cache: "no-store" });
-      const data = (await response.json()) as HealthStatus;
-      setHealth(data);
-    } catch {
-      setHealth(null);
-    }
+    const data = await fetchHealth();
+    setHealth(data);
+    return data;
   }
 
-  async function pollJob(id: string) {
+  async function pollJob(id: string, repeat = true) {
     try {
       const response = await fetch(`/api/jobs/${id}`, { cache: "no-store" });
       if (!response.ok) {
@@ -107,6 +109,7 @@ export function StudioApp() {
       const data = (await response.json()) as { job: PublicJob };
       setJob(data.job);
       if (
+        repeat &&
         data.job.status !== "complete" &&
         data.job.status !== "failed" &&
         data.job.status !== "cancelled"
@@ -116,9 +119,11 @@ export function StudioApp() {
         }, 1200);
       }
     } catch {
-      window.setTimeout(() => {
-        void pollJob(id);
-      }, 2000);
+      if (repeat) {
+        window.setTimeout(() => {
+          void pollJob(id);
+        }, 2000);
+      }
     }
   }
 
@@ -134,12 +139,16 @@ export function StudioApp() {
     setUploading(true);
     setJob(null);
     try {
-      const body = new FormData();
-      body.append("file", input);
-      const response = await fetch("/api/upload", { method: "POST", body });
-      const data = (await response.json()) as UploadedFile & { error?: string };
-      if (!response.ok) {
-        throw new Error(data.error || "Upload failed");
+      const latest = health ?? (await fetchHealth());
+      let data: UploadedFile;
+      if (latest?.blob?.configured) {
+        data = await uploadViaBlob(input);
+      } else if (latest?.hosting === "vercel") {
+        throw new Error(
+          "Connect a Vercel Blob store to this project so clips can upload past the function body limit.",
+        );
+      } else {
+        data = await uploadViaForm(input);
       }
       setFile(data);
       pushToast({
@@ -296,4 +305,55 @@ function notifyBrowser(title: string, body: string) {
       }
     });
   }
+}
+
+async function fetchHealth(): Promise<HealthStatus | null> {
+  try {
+    const response = await fetch("/api/health", { cache: "no-store" });
+    return (await response.json()) as HealthStatus;
+  } catch {
+    return null;
+  }
+}
+
+function extensionOf(name: string): string {
+  const match = /\.[a-z0-9]+$/i.exec(name);
+  const ext = match ? match[0].toLowerCase() : ".mp4";
+  return ACCEPTED_EXTENSIONS.some((item) => item === ext) ? ext : ".mp4";
+}
+
+async function uploadViaForm(input: File): Promise<UploadedFile> {
+  const body = new FormData();
+  body.append("file", input);
+  const response = await fetch("/api/upload", { method: "POST", body });
+  const data = (await response.json()) as UploadedFile & { error?: string };
+  if (!response.ok) {
+    throw new Error(data.error || "Upload failed");
+  }
+  return data;
+}
+
+async function uploadViaBlob(input: File): Promise<UploadedFile> {
+  const id = crypto.randomUUID();
+  const blob = await upload(`uploads/${id}${extensionOf(input.name)}`, input, {
+    access: "public",
+    handleUploadUrl: "/api/upload/token",
+    clientPayload: JSON.stringify({ id, name: input.name }),
+    multipart: true,
+  });
+  const response = await fetch("/api/ingest", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      id,
+      name: input.name,
+      url: blob.url,
+      pathname: blob.pathname,
+    }),
+  });
+  const data = (await response.json()) as UploadedFile & { error?: string };
+  if (!response.ok) {
+    throw new Error(data.error || "Could not probe that clip");
+  }
+  return data;
 }

@@ -1,9 +1,9 @@
-import { createReadStream } from "node:fs";
-import { stat } from "node:fs/promises";
 import path from "node:path";
-import { Readable } from "node:stream";
+import { NextResponse } from "next/server";
 import { loadJob } from "@/lib/jobs";
-import { findUpload, outputPath, thumbDir } from "@/lib/paths";
+import { localPathFor, loadStoredFile } from "@/lib/storage";
+import { streamLocalFile } from "@/lib/stream-file";
+import { isHttpUrl, withDownloadParam } from "@/lib/url";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -12,85 +12,60 @@ type RouteContext = {
   params: Promise<{ jobId: string; kind: string; rest?: string[] }>;
 };
 
-const MIME: Record<string, string> = {
-  ".mp4": "video/mp4",
-  ".mov": "video/quicktime",
-  ".webm": "video/webm",
-  ".mkv": "video/x-matroska",
-  ".avi": "video/x-msvideo",
-  ".m4v": "video/mp4",
-  ".jpg": "image/jpeg",
-  ".jpeg": "image/jpeg",
-  ".png": "image/png",
-};
-
 export async function GET(
   request: Request,
   context: RouteContext,
 ): Promise<Response> {
   const { jobId, kind, rest = [] } = await context.params;
+  const wantsDownload = new URL(request.url).searchParams.get("download") === "1";
+  let url: string | null = null;
   let filePath: string | null = null;
-  let downloadName: string | null = null;
+  let downloadName = "clip.mp4";
+  let cacheControl: string | undefined;
 
   if (kind === "source") {
     const job = await loadJob(jobId);
-    filePath = job?.sourcePath ?? (await findUpload(jobId));
-    downloadName = job?.name ?? "source.mp4";
+    const stored = job ? null : await loadStoredFile(jobId);
+    url = job?.sourceUrl ?? stored?.url ?? null;
+    downloadName = job?.name ?? stored?.name ?? "source.mp4";
+    if (job && !isHttpUrl(job.sourceUrl)) {
+      filePath = job.sourcePath.startsWith("/")
+        ? job.sourcePath
+        : localPathFor(job.sourcePath);
+    } else if (stored && !isHttpUrl(stored.url)) {
+      filePath = localPathFor(stored.pathname);
+    }
   } else if (kind === "output") {
     const job = await loadJob(jobId);
-    filePath = job?.outputPath ?? outputPath(jobId);
-    downloadName = job ? enhanceName(job.name) : "enhanced.mp4";
+    if (!job) {
+      return new Response("Not found", { status: 404 });
+    }
+    url = job.outputUrl;
+    downloadName = enhanceName(job.name);
+    if (job.outputPath && !isHttpUrl(job.outputUrl ?? "")) {
+      filePath = job.outputPath.startsWith("/")
+        ? job.outputPath
+        : localPathFor(job.outputPath);
+    }
   } else if (kind === "thumb") {
     const filename = rest[0];
     if (!filename || filename.includes("..") || filename.includes("/")) {
       return new Response("Not found", { status: 404 });
     }
-    filePath = path.join(thumbDir(jobId), filename);
+    filePath = localPathFor(`thumbs/${jobId}/${filename}`);
+    cacheControl = "public, max-age=86400";
   } else {
     return new Response("Not found", { status: 404 });
   }
 
+  if (url && isHttpUrl(url)) {
+    return NextResponse.redirect(wantsDownload ? withDownloadParam(url) : url);
+  }
   if (!filePath) {
     return new Response("Not found", { status: 404 });
   }
-
   try {
-    const info = await stat(filePath);
-    const ext = path.extname(filePath).toLowerCase();
-    const type = MIME[ext] ?? "application/octet-stream";
-    const range = request.headers.get("range");
-    const wantsDownload = new URL(request.url).searchParams.get("download") === "1";
-
-    if (range) {
-      const match = /bytes=(\d+)-(\d*)/.exec(range);
-      if (!match) {
-        return new Response("Invalid range", { status: 416 });
-      }
-      const start = Number(match[1]);
-      const end = match[2] ? Number(match[2]) : info.size - 1;
-      const stream = createReadStream(filePath, { start, end });
-      return new Response(Readable.toWeb(stream) as ReadableStream, {
-        status: 206,
-        headers: {
-          "Content-Type": type,
-          "Content-Length": String(end - start + 1),
-          "Content-Range": `bytes ${start}-${end}/${info.size}`,
-          "Accept-Ranges": "bytes",
-        },
-      });
-    }
-
-    const stream = createReadStream(filePath);
-    const headers = new Headers({
-      "Content-Type": type,
-      "Content-Length": String(info.size),
-      "Accept-Ranges": "bytes",
-      "Cache-Control": kind === "thumb" ? "public, max-age=86400" : "no-store",
-    });
-    if (wantsDownload && downloadName) {
-      headers.set("Content-Disposition", `attachment; filename="${downloadName}"`);
-    }
-    return new Response(Readable.toWeb(stream) as ReadableStream, { headers });
+    return await streamLocalFile(filePath, request, { downloadName, cacheControl });
   } catch {
     return new Response("Not found", { status: 404 });
   }

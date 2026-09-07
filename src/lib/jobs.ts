@@ -1,6 +1,5 @@
 import { EventEmitter } from "node:events";
-import { readdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
-import { ensureDirs, JOBS_DIR, jobFile } from "./paths";
+import { listPathnames, readJson, saveJson } from "./storage";
 import type { Job, JobEvent, JobEventLevel, PublicJob } from "./types";
 
 const emitter = new EventEmitter();
@@ -17,39 +16,32 @@ export function toPublicJob(job: Job): PublicJob {
 }
 
 async function persist(job: Job): Promise<void> {
-  await ensureDirs();
-  const tmp = `${jobFile(job.id)}.tmp`;
-  await writeFile(tmp, JSON.stringify(job, null, 2), "utf8");
-  await rename(tmp, jobFile(job.id));
+  await saveJson(`jobs/${job.id}.json`, job);
   cache.set(job.id, job);
   emitter.emit(job.id, job);
   emitter.emit("all", job);
 }
 
 export async function loadJob(id: string): Promise<Job | null> {
-  const cached = cache.get(id);
-  if (cached) {
-    return cached;
+  const stored = await readJson<Job>(`jobs/${id}.json`);
+  if (stored) {
+    cache.set(id, stored);
+    return stored;
   }
-  try {
-    const raw = await readFile(jobFile(id), "utf8");
-    const job = JSON.parse(raw) as Job;
-    cache.set(id, job);
-    return job;
-  } catch {
-    return null;
-  }
+  return cache.get(id) ?? null;
 }
 
 export async function listJobs(): Promise<Job[]> {
-  await ensureDirs();
-  const files = await readdir(JOBS_DIR);
+  const pathnames = await listPathnames("jobs/");
   const jobs: Job[] = [];
-  for (const file of files) {
-    if (!file.endsWith(".json") || file.endsWith(".tmp")) {
+  for (const pathname of pathnames) {
+    if (!pathname.endsWith(".json") || pathname.endsWith(".tmp")) {
       continue;
     }
-    const id = file.replace(/\.json$/, "");
+    const id = pathname.split("/").pop()?.replace(/\.json$/, "");
+    if (!id) {
+      continue;
+    }
     const job = await loadJob(id);
     if (job) {
       jobs.push(job);
@@ -110,7 +102,17 @@ export function subscribe(
   listener: (job: Job) => void,
 ): () => void {
   emitter.on(id, listener);
-  return () => emitter.off(id, listener);
+  const timer = setInterval(() => {
+    void loadJob(id).then((job) => {
+      if (job) {
+        listener(job);
+      }
+    });
+  }, 1000);
+  return () => {
+    emitter.off(id, listener);
+    clearInterval(timer);
+  };
 }
 
 export function getAbortController(id: string): AbortController {
@@ -138,11 +140,6 @@ export function requestCancel(id: string): boolean {
 
 export async function removeJob(id: string): Promise<void> {
   cache.delete(id);
-  try {
-    await unlink(jobFile(id));
-  } catch {
-    // already gone
-  }
 }
 
 export function levelForStatus(status: Job["status"]): JobEventLevel {

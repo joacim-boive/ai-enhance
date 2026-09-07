@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { formatFps, formatResolution } from "@/lib/format";
+import { withDownloadParam } from "@/lib/url";
 import type { PublicJob } from "@/lib/types";
 
 type Props = {
@@ -66,7 +67,7 @@ export function ComparisonViewer({ job }: Props) {
           </button>
           {job.outputUrl ? (
             <a
-              href={`${job.outputUrl}?download=1`}
+              href={withDownloadParam(job.outputUrl)}
               className="rounded-full bg-[var(--ink)] px-4 py-2 text-xs uppercase tracking-[0.16em] text-[var(--bg)]"
             >
               Download master
