@@ -1,5 +1,6 @@
 import { even } from "./format";
 import type {
+  EnginePreference,
   FpsMode,
   JobSettings,
   QualityPreset,
@@ -193,6 +194,21 @@ export function isNoOp(meta: VideoMeta, settings: JobSettings): boolean {
     !settings.denoise &&
     !settings.sharpen
   );
+}
+
+export function preferGpuEngine(input: {
+  enginePreference: EnginePreference;
+  gpuConfigured: boolean;
+  scaleChanged: boolean;
+  fpsChanged: boolean;
+}): boolean {
+  if (input.enginePreference === "cpu" || !input.gpuConfigured) {
+    return false;
+  }
+  if (input.enginePreference === "gpu") {
+    return true;
+  }
+  return input.scaleChanged || input.fpsChanged;
 }
 
 export function engineLabel(engine: "gpu" | "cpu" | null): string {

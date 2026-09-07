@@ -1,9 +1,41 @@
+import type { HostEnvironment } from "./types";
+
+export type { HostEnvironment };
+
+export function runtimeEnv(name: string): string | undefined {
+  const bag: NodeJS.ProcessEnv = process["env"];
+  const value = bag[name];
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
 export function isVercel(): boolean {
-  return process.env.VERCEL === "1";
+  return runtimeEnv("VERCEL") === "1";
+}
+
+export function hostEnvironment(): HostEnvironment {
+  const value = runtimeEnv("VERCEL_ENV");
+  if (value === "production" || value === "preview" || value === "development") {
+    return value;
+  }
+  return "local";
 }
 
 export function blobEnabled(): boolean {
-  return Boolean(process.env.BLOB_READ_WRITE_TOKEN || process.env.BLOB_STORE_ID);
+  return Boolean(runtimeEnv("BLOB_READ_WRITE_TOKEN") || runtimeEnv("BLOB_STORE_ID"));
+}
+
+export function missingGpuKeyMessage(environment: HostEnvironment = hostEnvironment()): string {
+  if (environment === "preview") {
+    return "RUNPOD_API_KEY is missing on this Preview deployment. In Vercel → Settings → Environment Variables, enable it for Preview (not only Production), then Redeploy.";
+  }
+  if (environment === "production") {
+    return "RUNPOD_API_KEY is missing on Production. Add it in Vercel → Settings → Environment Variables for Production, then Redeploy.";
+  }
+  return "Add RUNPOD_API_KEY to .env.local to enable GPU processing. CPU fallback is active.";
 }
 
 export function publicBaseUrl(): string {

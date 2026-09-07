@@ -1,3 +1,4 @@
+import { missingGpuKeyMessage, runtimeEnv } from "./env";
 import type { HealthStatus } from "./types";
 
 const DEFAULT_ENDPOINT = "npjpz24ig6c47j";
@@ -6,9 +7,8 @@ export function runpodConfig(): {
   apiKey: string | null;
   endpointId: string;
 } {
-  const apiKey = process.env.RUNPOD_API_KEY?.trim() || null;
-  const endpointId =
-    process.env.RUNPOD_ENDPOINT_ID?.trim() || DEFAULT_ENDPOINT;
+  const apiKey = runtimeEnv("RUNPOD_API_KEY") ?? null;
+  const endpointId = runtimeEnv("RUNPOD_ENDPOINT_ID") ?? DEFAULT_ENDPOINT;
   return { apiKey, endpointId };
 }
 
@@ -47,7 +47,7 @@ export async function gpuHealth(): Promise<HealthStatus["gpu"]> {
       endpointId: null,
       ready: false,
       workers: null,
-      message: "Add RUNPOD_API_KEY to enable GPU processing. CPU fallback is active.",
+      message: missingGpuKeyMessage(),
     };
   }
   try {

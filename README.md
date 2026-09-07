@@ -20,12 +20,14 @@ This repo is already linked to the Vercel project. Preview and production builds
 
 Connect a **Blob** store to the project. That injects `BLOB_STORE_ID` and `BLOB_WEBHOOK_PUBLIC_KEY` (OIDC). The studio uses those for server writes and browser uploads. Without Blob, real clips cannot persist on Vercel.
 
-Also set in the Vercel project (Production + Preview):
+Also set in the Vercel project for **Production and Preview** (both checkboxes), then **Redeploy**:
 
 ```
 RUNPOD_API_KEY=...
 RUNPOD_ENDPOINT_ID=npjpz24ig6c47j
 ```
+
+The header shows **GPU unset** when that deployment’s function cannot read `RUNPOD_API_KEY`. Blob store variables are injected into every environment automatically; a manual Runpod key is not. Adding it only to Production leaves Preview unset. After changing env vars, Vercel does not patch a live deployment — create a new one.
 
 `PUBLIC_BASE_URL` is optional once Blob is public: the GPU worker fetches the blob URL directly. Fluid Compute is on (`vercel.json`) so job processing can continue after the HTTP response via `after()`. Functions stay in **Europe** (`fra1`), matching the usual Vercel region for this setup.
 

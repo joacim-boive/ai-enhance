@@ -206,13 +206,14 @@ export function StudioApp() {
           "Connect a Vercel Blob store to this project so enhancement jobs can persist.",
         );
       }
+      const jobSettings = settingsForHealth(settings, latest ?? health);
       const response = await fetch("/api/jobs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           fileId: file.id,
           name: file.name,
-          settings,
+          settings: jobSettings,
         }),
       });
       const data = (await response.json()) as { job?: PublicJob; error?: string };
@@ -226,7 +227,7 @@ export function StudioApp() {
         title: "Enhancement started",
         body: health?.gpu.configured
           ? "Trying the GPU first. We’ll fall back if it can’t warm up."
-          : "Processing on CPU with Lanczos and motion interpolation.",
+          : "GPU is unset on this deployment, so this run uses CPU.",
       });
     } catch (error) {
       pushToast({
@@ -265,10 +266,16 @@ export function StudioApp() {
     job?.status === "warming" ||
     job?.status === "processing" ||
     job?.status === "encoding";
+  const panelSettings = settingsForHealth(settings, health);
 
   return (
     <div className="relative mx-auto min-h-screen w-full max-w-[1440px] px-5 pb-20 pt-6 md:px-8">
       <AppHeader health={health} />
+      {health && !health.gpu.configured ? (
+        <div className="mb-6 rounded-2xl border border-[var(--gold)]/40 bg-[rgba(226,181,122,0.08)] px-4 py-3 text-sm leading-6 text-[var(--gold)]">
+          {health.gpu.message}
+        </div>
+      ) : null}
       <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">
         <div>
           {file ? (
@@ -284,8 +291,9 @@ export function StudioApp() {
           )}
         </div>
         <EnhancePanel
-          settings={settings}
+          settings={panelSettings}
           meta={file?.meta ?? null}
+          health={health}
           working={working}
           canEnhance={Boolean(file) && !working}
           onChange={setSettings}
@@ -326,6 +334,13 @@ async function fetchHealth(): Promise<HealthStatus | null> {
   } catch {
     return null;
   }
+}
+
+function settingsForHealth(settings: JobSettings, health: HealthStatus | null): JobSettings {
+  if (health && !health.gpu.configured && settings.enginePreference === "gpu") {
+    return { ...settings, enginePreference: "auto" };
+  }
+  return settings;
 }
 
 function extensionOf(name: string): string {

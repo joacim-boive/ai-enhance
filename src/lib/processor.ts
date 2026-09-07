@@ -21,7 +21,7 @@ import {
   pollGpuJob,
   submitGpuJob,
 } from "./runpod";
-import { isNoOp, resolveOutputTarget } from "./settings";
+import { isNoOp, preferGpuEngine, resolveOutputTarget } from "./settings";
 import { contentTypeForName, localPathFor, saveFromPath } from "./storage";
 import type { Engine, Job } from "./types";
 import { isHttpUrl } from "./url";
@@ -111,16 +111,17 @@ async function processJob(id: string): Promise<void> {
   }
 
   const target = resolveOutputTarget(meta, job.settings);
-  const preferGpu =
-    job.settings.enginePreference === "gpu" ||
-    (job.settings.enginePreference === "auto" &&
-      isGpuConfigured() &&
-      target.scaleChanged);
+  const preferGpu = preferGpuEngine({
+    enginePreference: job.settings.enginePreference,
+    gpuConfigured: isGpuConfigured(),
+    scaleChanged: target.scaleChanged,
+    fpsChanged: target.fpsChanged,
+  });
 
   let usedEngine: Engine = "cpu";
   let fallbackReason: string | null = null;
 
-  if (preferGpu && job.settings.enginePreference !== "cpu") {
+  if (preferGpu) {
     try {
       usedEngine = await runGpu({ ...job, sourceMeta: meta }, controller.signal, target);
     } catch (error) {
@@ -148,7 +149,7 @@ async function processJob(id: string): Promise<void> {
       fallbackReason = "GPU is not configured on this server.";
       await appendEvent(id, {
         stage: "Fallback",
-        message: "No GPU key configured. Processing on CPU with Lanczos + motion interpolation.",
+        message: "GPU key is missing on this deployment. Processing on CPU with Lanczos + motion interpolation.",
         progress: 8,
         level: "warn",
       });

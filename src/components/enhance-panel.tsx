@@ -9,11 +9,12 @@ import {
   settingsFromPreset,
   withCustomOverride,
 } from "@/lib/settings";
-import type { EnginePreference, JobSettings, VideoMeta } from "@/lib/types";
+import type { EnginePreference, HealthStatus, JobSettings, VideoMeta } from "@/lib/types";
 
 type Props = {
   settings: JobSettings;
   meta: VideoMeta | null;
+  health: HealthStatus | null;
   working: boolean;
   canEnhance: boolean;
   onChange: (settings: JobSettings) => void;
@@ -23,6 +24,7 @@ type Props = {
 export function EnhancePanel({
   settings,
   meta,
+  health,
   working,
   canEnhance,
   onChange,
@@ -108,11 +110,15 @@ export function EnhancePanel({
             <Chip
               key={engine.id}
               active={settings.enginePreference === engine.id}
+              disabled={engine.id === "gpu" && health !== null && !health.gpu.configured}
               label={engine.label}
               onClick={() => onChange({ ...settings, enginePreference: engine.id })}
             />
           ))}
         </div>
+        {health && !health.gpu.configured ? (
+          <p className="mt-3 text-[11px] leading-5 text-[var(--gold)]">{health.gpu.message}</p>
+        ) : null}
       </div>
 
       <div className="mt-8 flex flex-col gap-4">
@@ -144,19 +150,25 @@ function Chip({
   active,
   label,
   onClick,
+  disabled = false,
 }: {
   active: boolean;
   label: string;
   onClick: () => void;
+  disabled?: boolean;
 }) {
   return (
     <button
       type="button"
+      disabled={disabled}
+      title={disabled ? "GPU key is not configured on this deployment." : undefined}
       onClick={onClick}
       className={`rounded-full px-3 py-1.5 text-xs uppercase tracking-[0.14em] ${
-        active
-          ? "bg-[var(--ink)] text-[var(--bg)]"
-          : "border border-[var(--line)] text-[var(--muted)] hover:text-[var(--ink)]"
+        disabled
+          ? "cursor-not-allowed border border-[var(--line)] text-[var(--muted)] opacity-40"
+          : active
+            ? "bg-[var(--ink)] text-[var(--bg)]"
+            : "border border-[var(--line)] text-[var(--muted)] hover:text-[var(--ink)]"
       }`}
     >
       {label}

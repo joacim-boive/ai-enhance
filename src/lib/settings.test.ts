@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { resolveOutputTarget, settingsFromPreset } from "./settings";
+import { preferGpuEngine, resolveOutputTarget, settingsFromPreset } from "./settings";
 import type { VideoMeta } from "./types";
 
 const meta: VideoMeta = {
@@ -36,4 +36,28 @@ test("cinema 4k fits 720p into 3840x2160", () => {
   const target = resolveOutputTarget(meta, settingsFromPreset("cinema"));
   assert.equal(target.width, 3840);
   assert.equal(target.height, 2160);
+});
+
+test("auto uses GPU for fps-only jobs when configured", () => {
+  assert.equal(
+    preferGpuEngine({
+      enginePreference: "auto",
+      gpuConfigured: true,
+      scaleChanged: false,
+      fpsChanged: true,
+    }),
+    true,
+  );
+});
+
+test("auto stays on CPU when the GPU key is missing", () => {
+  assert.equal(
+    preferGpuEngine({
+      enginePreference: "auto",
+      gpuConfigured: false,
+      scaleChanged: true,
+      fpsChanged: true,
+    }),
+    false,
+  );
 });
