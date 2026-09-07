@@ -118,8 +118,7 @@ export async function ensureR2Cors(): Promise<boolean> {
 
 export async function presignPutUrl(objectKey: string, contentType: string): Promise<string> {
   const { client, bucket } = requireR2();
-  await ensureR2Cors();
-  return getSignedUrl(
+  const url = await getSignedUrl(
     client,
     new PutObjectCommand({
       Bucket: bucket,
@@ -128,6 +127,8 @@ export async function presignPutUrl(objectKey: string, contentType: string): Pro
     }),
     { expiresIn: PUT_EXPIRES_SEC },
   );
+  void ensureR2Cors();
+  return url;
 }
 
 export async function presignGetUrl(
@@ -153,7 +154,6 @@ export async function createOutputUploadGrant(input: {
   contentType: string;
 }): Promise<OutputUploadGrant> {
   const { client, bucket } = requireR2();
-  await ensureR2Cors();
   const putUrl = await presignPutUrl(input.objectKey, input.contentType);
   const created = await client.send(
     new CreateMultipartUploadCommand({

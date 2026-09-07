@@ -86,7 +86,11 @@ export async function getRequestSession(): Promise<Session> {
     return parsed;
   }
   const session = newSession();
-  store.set(SESSION_COOKIE, encodeSession(session), sessionCookieOptions());
+  try {
+    store.set(SESSION_COOKIE, encodeSession(session), sessionCookieOptions());
+  } catch {
+    // Proxy may already have committed Set-Cookie on this request.
+  }
   return session;
 }
 
