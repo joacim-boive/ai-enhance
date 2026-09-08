@@ -84,13 +84,21 @@ export async function gpuHealth(): Promise<HealthStatus["gpu"]> {
   // List workers via REST. Do not GET api.runpod.ai /health — that ping can
   // reset idle timeout and leave a 4090 billed after a job.
   const fetched = await fetchGpuWorkerSnapshot();
-  const workers = fetched.snapshot
+  let snapshot = fetched.snapshot;
+  if (
+    snapshot &&
+    gpuWorkerReadyCount(snapshot) === 0 &&
+    (snapshot.throttled > 0 || snapshot.unhealthy > 0)
+  ) {
+    snapshot = await diagnoseGpuWorkers(snapshot);
+  }
+  const workers = snapshot
     ? {
-        idle: fetched.snapshot.idle,
-        running: fetched.snapshot.running,
-        initializing: fetched.snapshot.initializing,
-        throttled: fetched.snapshot.throttled,
-        unhealthy: fetched.snapshot.unhealthy,
+        idle: snapshot.idle,
+        running: snapshot.running,
+        initializing: snapshot.initializing,
+        throttled: snapshot.throttled,
+        unhealthy: snapshot.unhealthy,
       }
     : null;
   const ready = gpuWorkerReadyCount(workers) > 0;
@@ -113,8 +121,8 @@ export async function gpuHealth(): Promise<HealthStatus["gpu"]> {
   let message = gpuOnDemandMessage();
   if (!fetched.reachable || !fetched.httpOk) {
     message = gpuUnreachableMessage();
-  } else if (fetched.snapshot) {
-    message = gpuWorkerStatusMessage(fetched.snapshot);
+  } else if (snapshot) {
+    message = gpuWorkerStatusMessage(snapshot);
   }
   return {
     configured: true,

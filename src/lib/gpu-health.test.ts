@@ -128,13 +128,13 @@ test("parseGpuWorkersResponse reads REST items plus summary", () => {
   assert.equal(snapshot.workers[0]?.dataCenterId, "EUR-NO-1");
 });
 
-test("gpu worker copy names regions and Hub pull stalls", () => {
+test("gpu worker copy names regions without blaming Hub when a worker is already running", () => {
   const snapshot = parseGpuWorkersResponse(liveFleet);
   const message = gpuWorkerStatusMessage(snapshot);
   assert.match(message, /EUR-NO-1 \(Europe\)/);
   assert.match(message, /US-IL-1 \(United States\)/);
   assert.match(message, /EUR-IS-2 \(Europe\)/);
-  assert.match(message, /Hub image pull or registry auth/);
+  assert.doesNotMatch(message, /Hub image pull or registry auth/);
   assert.equal(gpuHealthKind({
     configured: true,
     r2Ready: true,
@@ -145,6 +145,22 @@ test("gpu worker copy names regions and Hub pull stalls", () => {
   assert.equal(gpuBadgeLabel("running"), "GPU busy");
   assert.equal(gpuBadgeLabel("throttled"), "GPU stuck");
   assert.equal(gpuBadgeLabel("warming"), "GPU warming");
+});
+
+test("throttled workers without Hub log diagnosis do not blame registry auth", () => {
+  const snapshot = parseGpuWorkersResponse({
+    workers: [
+      {
+        id: "us",
+        status: "THROTTLED",
+        dataCenterId: "US-NC-1",
+        image: "registry.runpod.net/wlsdml1114-upscale-interpolation-runpod-hub-main-dockerfile:78b79f1b2",
+      },
+    ],
+  });
+  const message = gpuWorkerStatusMessage(snapshot);
+  assert.match(message, /throttled in US-NC-1 \(United States\)/);
+  assert.doesNotMatch(message, /Hub image pull or registry auth/);
 });
 
 test("throttled Hub auth logs become a human message", () => {
@@ -177,6 +193,7 @@ test("throttled Hub auth logs become a human message", () => {
   const message = gpuWorkerStatusMessage(snapshot);
   assert.match(message, /US-IL-1/);
   assert.match(message, /Hub registry auth failed/);
+  assert.doesNotMatch(message, /Europe often works/);
   assert.equal(
     gpuHealthKind({
       configured: true,
@@ -246,10 +263,21 @@ test("fleet banner stays off for cold on-demand GPU", () => {
     }),
     true,
   );
+  assert.equal(
+    gpuShowsFleetBanner({
+      ...gpu,
+      kind: "idle",
+      ready: true,
+      workers: { idle: 1, running: 0, initializing: 0, throttled: 1, unhealthy: 0 },
+      message: "GPU worker is idle",
+    }),
+    false,
+  );
 });
 
 test("formatDataCenter labels known prefixes", () => {
   assert.equal(formatDataCenter("EUR-NO-1"), "EUR-NO-1 (Europe)");
+  assert.equal(formatDataCenter("EU-NL-1"), "EU-NL-1 (Europe)");
   assert.equal(formatDataCenter("US-IL-1"), "US-IL-1 (United States)");
   assert.equal(formatDataCenter(null), "an unknown region");
 });

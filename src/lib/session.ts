@@ -78,6 +78,12 @@ export function sessionCookieOptions(): {
   };
 }
 
+export async function writeSessionCookie(session: Session): Promise<void> {
+  const { cookies } = await import("next/headers");
+  const store = await cookies();
+  store.set(SESSION_COOKIE, encodeSession(session), sessionCookieOptions());
+}
+
 export async function getRequestSession(): Promise<Session> {
   const { cookies } = await import("next/headers");
   const store = await cookies();
@@ -87,10 +93,19 @@ export async function getRequestSession(): Promise<Session> {
   }
   const session = newSession();
   try {
-    store.set(SESSION_COOKIE, encodeSession(session), sessionCookieOptions());
+    await writeSessionCookie(session);
   } catch {
     // Proxy may already have committed Set-Cookie on this request.
   }
+  return session;
+}
+
+export async function adoptSession(userId: string): Promise<Session> {
+  if (!/^[0-9a-f-]{36}$/i.test(userId)) {
+    throw new Error("Invalid session.");
+  }
+  const session: Session = { userId };
+  await writeSessionCookie(session);
   return session;
 }
 

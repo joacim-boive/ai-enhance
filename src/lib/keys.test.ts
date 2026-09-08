@@ -5,10 +5,12 @@ import {
   jobObjectsPrefix,
   jobOutputKey,
   jobRecordKey,
+  normalizePairCode,
   ownsObjectKey,
   parseClipIdFromRecordKey,
   parseFileIdFromUploadKey,
   parseJobIdFromRecordKey,
+  pairRecordKey,
   uploadObjectKey,
 } from "./keys";
 
@@ -32,4 +34,11 @@ test("job output keys are user-scoped", () => {
 test("object keys reject traversal and non-uuids", () => {
   assert.throws(() => jobOutputKey("not-a-uuid", jobId));
   assert.equal(ownsObjectKey(userId, `users/${userId}/../secret`), false);
+});
+
+test("studio pair codes normalize and key into R2", () => {
+  assert.equal(normalizePairCode(" ab-cd2e "), "ABCD2E");
+  assert.equal(normalizePairCode("too-long-code"), "TOOLON");
+  assert.equal(pairRecordKey("ABCD2E"), "pairs/ABCD2E.json");
+  assert.throws(() => pairRecordKey("short"));
 });

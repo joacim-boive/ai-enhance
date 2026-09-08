@@ -85,6 +85,19 @@ export function parseJobIdFromRecordKey(objectKey: string): string | null {
   return match?.[1] ?? null;
 }
 
+export const PAIR_CODE_PATTERN = /^[A-Z2-9]{6}$/;
+
+export function normalizePairCode(raw: string): string {
+  return raw.trim().toUpperCase().replace(/[^A-Z2-9]/g, "").slice(0, 6);
+}
+
+export function pairRecordKey(code: string): string {
+  if (!PAIR_CODE_PATTERN.test(code)) {
+    throw new Error("Invalid pair code");
+  }
+  return `pairs/${code}.json`;
+}
+
 export function ownsObjectKey(userId: string, objectKey: string): boolean {
   return objectKey.startsWith(`users/${userId}/`) && !objectKey.includes("..");
 }

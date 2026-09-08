@@ -500,7 +500,7 @@ export function StudioApp() {
   const workingLabel = uploading ? "Uploading…" : starting ? "Queuing…" : "Working…";
 
   return (
-    <div className="relative mx-auto min-h-screen w-full max-w-[1440px] px-5 pb-20 pt-6 md:px-8">
+    <div className="relative mx-auto min-h-screen w-full max-w-[1440px] overflow-x-hidden px-5 pb-20 pt-6 md:px-8">
       <AppHeader
         health={health}
         activeJobCount={metrics.active}
@@ -517,8 +517,8 @@ export function StudioApp() {
         </div>
       ) : null}
 
-      <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">
-        <div>
+      <div className="grid min-w-0 items-start gap-6 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)]">
+        <div className="min-w-0">
           {file ? (
             <SourceStage
               file={file}

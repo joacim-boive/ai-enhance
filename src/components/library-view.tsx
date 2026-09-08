@@ -12,6 +12,7 @@ import {
 import { historyEntries, latestVersion, versionCount } from "@/lib/library-tree";
 import type { LibraryFamily, PublicClip } from "@/lib/types";
 import { ClipReview } from "./clip-review";
+import { LibraryPair } from "./library-pair";
 
 export function LibraryView() {
   const [families, setFamilies] = useState<LibraryFamily[]>([]);
@@ -146,6 +147,16 @@ export function LibraryView() {
       </div>
 
       {error ? <p className="mt-6 text-[var(--err)]">{error}</p> : null}
+
+      {!loading && !selectedFamily ? (
+        <LibraryPair
+          hasClips={families.length > 0}
+          onClaimed={async () => {
+            setError(null);
+            await refresh();
+          }}
+        />
+      ) : null}
 
       {loading ? (
         <p className="panel mt-8 rounded-[28px] px-6 py-16 text-center text-[var(--muted)]">

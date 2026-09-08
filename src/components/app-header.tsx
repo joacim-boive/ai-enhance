@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { usePathname } from "next/navigation";
 import type { HealthStatus } from "@/lib/types";
 import { EngineBadge } from "./engine-badge";
 import { GpuFleetBanner } from "./gpu-fleet-banner";
@@ -23,6 +24,8 @@ export function AppHeader({
 }: Props) {
   const [fetched, setFetched] = useState<HealthStatus | null>(null);
   const selfFetch = healthProp === undefined;
+  const pathname = usePathname();
+  const libraryActive = pathname === "/library";
 
   useEffect(() => {
     if (!selfFetch) {
@@ -54,8 +57,8 @@ export function AppHeader({
 
   return (
     <>
-      <header className="mb-8 flex flex-wrap items-end justify-between gap-4">
-        <div>
+      <header className="mb-8 flex flex-col gap-4 overflow-x-hidden">
+        <div className="min-w-0">
           <Link href="/" className="group flex items-baseline gap-3">
             <span className="font-serif text-3xl tracking-tight gold-text md:text-4xl">
               Lumen
@@ -69,45 +72,51 @@ export function AppHeader({
             graceful fallback if the GPU is cold.
           </p>
         </div>
-        <div className="flex items-center gap-3">
-          {onToggleQueue ? (
-            <button
-              type="button"
-              onClick={onToggleQueue}
-              className={`flex items-center gap-1.5 rounded-full border px-4 py-2 text-xs uppercase tracking-[0.18em] transition cursor-pointer ${
-                isQueueOpen
-                  ? "border-[var(--gold)] text-[var(--gold)] bg-[rgba(226,181,122,0.08)]"
+        <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+          <nav className="flex flex-wrap items-center gap-2">
+            {onToggleQueue ? (
+              <button
+                type="button"
+                onClick={onToggleQueue}
+                className={`flex items-center gap-1.5 rounded-full border px-4 py-2 text-xs uppercase tracking-[0.18em] transition cursor-pointer ${
+                  isQueueOpen
+                    ? "border-[var(--gold)] text-[var(--gold)] bg-[rgba(226,181,122,0.08)]"
+                    : "border-[var(--line)] text-[var(--muted)] hover:border-[var(--line-strong)] hover:text-[var(--ink)]"
+                }`}
+              >
+                {activeJobCount > 0 ? (
+                  <span className="h-2 w-2 rounded-full bg-[var(--teal)] animate-pulse" />
+                ) : null}
+                <span>Queue</span>
+                {activeJobCount > 0 ? (
+                  <span className="rounded-full bg-[rgba(65,182,157,0.2)] px-1.5 py-0.2 text-[10px] text-[var(--teal)] font-mono">
+                    {activeJobCount}
+                  </span>
+                ) : totalJobCount > 0 ? (
+                  <span className="text-[10px] text-[var(--muted)] font-mono">
+                    ({totalJobCount})
+                  </span>
+                ) : null}
+              </button>
+            ) : (
+              <Link
+                href="/?view=queue"
+                className="rounded-full border border-[var(--line)] px-4 py-2 text-xs uppercase tracking-[0.18em] text-[var(--muted)] transition hover:border-[var(--line-strong)] hover:text-[var(--ink)]"
+              >
+                Queue
+              </Link>
+            )}
+            <Link
+              href="/library"
+              className={`rounded-full border px-4 py-2 text-xs uppercase tracking-[0.18em] transition ${
+                libraryActive
+                  ? "border-[var(--gold)] bg-[rgba(226,181,122,0.08)] text-[var(--gold)]"
                   : "border-[var(--line)] text-[var(--muted)] hover:border-[var(--line-strong)] hover:text-[var(--ink)]"
               }`}
             >
-              {activeJobCount > 0 ? (
-                <span className="h-2 w-2 rounded-full bg-[var(--teal)] animate-pulse" />
-              ) : null}
-              <span>Queue</span>
-              {activeJobCount > 0 ? (
-                <span className="rounded-full bg-[rgba(65,182,157,0.2)] px-1.5 py-0.2 text-[10px] text-[var(--teal)] font-mono">
-                  {activeJobCount}
-                </span>
-              ) : totalJobCount > 0 ? (
-                <span className="text-[10px] text-[var(--muted)] font-mono">
-                  ({totalJobCount})
-                </span>
-              ) : null}
-            </button>
-          ) : (
-            <Link
-              href="/?view=queue"
-              className="rounded-full border border-[var(--line)] px-4 py-2 text-xs uppercase tracking-[0.18em] text-[var(--muted)] transition hover:border-[var(--line-strong)] hover:text-[var(--ink)]"
-            >
-              Queue
+              Library
             </Link>
-          )}
-          <Link
-            href="/library"
-            className="rounded-full border border-[var(--line)] px-4 py-2 text-xs uppercase tracking-[0.18em] text-[var(--muted)] transition hover:border-[var(--line-strong)] hover:text-[var(--ink)]"
-          >
-            Library
-          </Link>
+          </nav>
           <EngineBadge health={health} />
         </div>
       </header>
