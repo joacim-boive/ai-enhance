@@ -277,15 +277,17 @@ class PreparedRifeSource(NamedTuple):
 def prepare_rife_source(job_input: dict[str, Any] | None) -> PreparedRifeSource | None:
     """Download the clip, bake display rotation, split overlapping RIFE chunks."""
     from vram import (
+        gpu_chunk_source_frames,
         job_rife_plan,
         needs_rife_chunking,
+        needs_seedvr2_chunking,
         rife_chunk_ranges,
         rife_chunk_source_frames,
         rife_working_dimensions,
-        wants_rife_preprocess,
+        wants_gpu_preprocess,
     )
 
-    if not job_input or not wants_rife_preprocess(job_input):
+    if not job_input or not wants_gpu_preprocess(job_input):
         return None
 
     work_dir = tempfile.mkdtemp(prefix="lumen-rife-")
@@ -320,7 +322,10 @@ def prepare_rife_source(job_input: dict[str, Any] | None) -> PreparedRifeSource 
         frames = count_video_frames(source)
         plan = job_rife_plan(work_input)
         dims = rife_working_dimensions(work_input)
-        if plan is None:
+        tightest = gpu_chunk_source_frames(work_input)
+        if tightest is not None:
+            chunk_len = tightest
+        elif plan is None:
             chunk_len = frames
         elif dims is None:
             chunk_len = 16
@@ -329,11 +334,14 @@ def prepare_rife_source(job_input: dict[str, Any] | None) -> PreparedRifeSource 
         ranges = rife_chunk_ranges(frames, chunk_len)
         if not ranges:
             ranges = [(0, max(frames, 1))]
-        if not needs_rife_chunking(work_input, frames):
+        if not needs_rife_chunking(work_input, frames) and not needs_seedvr2_chunking(
+            work_input, frames
+        ):
             ranges = [(0, frames)]
 
+        reason = "SeedVR2" if needs_seedvr2_chunking(work_input, frames) else "RIFE"
         print(
-            f"Lumen wrap: RIFE source {frames} frames in {len(ranges)} chunk(s) "
+            f"Lumen wrap: {reason} source {frames} frames in {len(ranges)} chunk(s) "
             f"(~{chunk_len} source frames each)",
             flush=True,
         )

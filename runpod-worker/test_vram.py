@@ -6,7 +6,9 @@ from vram import (
     bypass_seedvr2,
     cap_resolution,
     clip_source_frames,
+    gpu_chunk_source_frames,
     needs_rife_chunking,
+    needs_seedvr2_chunking,
     patch_seedvr2_prompt,
     requested_resolution,
     rife_chunk_ranges,
@@ -14,7 +16,9 @@ from vram import (
     rife_fps_plan,
     rife_output_fps,
     rife_working_dimensions,
+    seedvr2_chunk_source_frames,
     should_skip_upscale,
+    wants_gpu_preprocess,
     wants_rife_preprocess,
 )
 
@@ -69,7 +73,8 @@ class VramTests(unittest.TestCase):
     def test_caps_hub_8k_default_to_4k_short_side(self) -> None:
         patched = patch_seedvr2_prompt(copy.deepcopy(HUB_PROMPT))
         self.assertEqual(patched["10"]["inputs"]["resolution"], 2160)
-        self.assertEqual(patched["10"]["inputs"]["batch_size"], 1)
+        self.assertEqual(patched["10"]["inputs"]["batch_size"], 5)
+        self.assertEqual(patched["10"]["inputs"]["temporal_overlap"], 1)
         self.assertEqual(patched["13"]["inputs"]["encode_tile_size"], 256)
         self.assertEqual(patched["13"]["inputs"]["offload_device"], "cpu")
         self.assertEqual(patched["14"]["inputs"]["blocks_to_swap"], 36)
@@ -191,6 +196,57 @@ class VramTests(unittest.TestCase):
             "scale_changed": False,
         }
         self.assertFalse(needs_rife_chunking(tiny))
+
+    def test_4k_upscale_chunks_seedvr2_instead_of_a_bigger_gpu(self) -> None:
+        uhd = {
+            "width": 2160,
+            "height": 3840,
+            "duration": 8,
+            "source_fps": 30,
+            "fps": 30,
+            "fps_changed": False,
+            "scale_changed": True,
+            "resolution": 2160,
+        }
+        self.assertTrue(needs_seedvr2_chunking(uhd))
+        self.assertTrue(wants_gpu_preprocess(uhd))
+        self.assertEqual(seedvr2_chunk_source_frames(2160, 3840), 5)
+        self.assertEqual(gpu_chunk_source_frames(uhd), 5)
+        hd = {
+            "width": 1080,
+            "height": 1920,
+            "duration": 8,
+            "source_fps": 30,
+            "scale_changed": True,
+            "resolution": 2160,
+        }
+        # 2× 1080p is 4K output — still chunk SeedVR2.
+        self.assertEqual(rife_working_dimensions(hd), (2160, 3840))
+        self.assertTrue(needs_seedvr2_chunking(hd))
+        phone_native = {
+            "width": 1080,
+            "height": 1920,
+            "duration": 8,
+            "source_fps": 24,
+            "fps": 24,
+            "fps_changed": False,
+            "scale_changed": False,
+            "resolution": 1080,
+        }
+        self.assertFalse(needs_seedvr2_chunking(phone_native))
+        both = {
+            "width": 2160,
+            "height": 3840,
+            "duration": 10,
+            "source_fps": 24,
+            "fps": 60,
+            "fps_changed": True,
+            "scale_changed": True,
+            "resolution": 2160,
+        }
+        self.assertTrue(needs_seedvr2_chunking(both))
+        self.assertTrue(needs_rife_chunking(both))
+        self.assertEqual(gpu_chunk_source_frames(both), 5)
 
     def test_rife_chunk_ranges_overlap_covers_every_source_frame(self) -> None:
         self.assertEqual(rife_chunk_ranges(10, 25), [(0, 10)])
