@@ -7,8 +7,9 @@ batch_size 33 / VAE tiles 1024. A 4K clip becomes 8K and dies in Phase 1 with
 
 from __future__ import annotations
 
+import math
 import os
-from typing import Any
+from typing import Any, NamedTuple
 
 MAX_SHORT_SIDE = 2160
 UPSCALER_TYPE = "SeedVR2VideoUpscaler"
@@ -17,6 +18,9 @@ DIT_TYPE = "SeedVR2LoadDiTModel"
 RIFE_TYPE = "RIFE VFI"
 VIDEO_COMPONENTS_TYPE = "GetVideoComponents"
 COMBINE_TYPE = "VHS_VideoCombine"
+# RIFE VFI only accepts an integer multiplier. 24→60 is 2.5×, so we go 5× to 120
+# and resample down. Cap so 25→60 does not explode to 12×.
+MAX_RIFE_MULTIPLIER = 8
 
 
 def max_short_side() -> int:
@@ -90,18 +94,66 @@ def _as_float(value: Any) -> float | None:
     return number
 
 
-def rife_output_fps(source_fps: float, target_fps: float) -> tuple[int, float]:
-    """RIFE uses an integer multiplier. Preserve duration: output fps = source * multiplier."""
+class RifeFpsPlan(NamedTuple):
+    multiplier: int
+    rife_fps: float
+    output_fps: float
+    resample: bool
+
+
+def rife_fps_plan(source_fps: float, target_fps: float) -> RifeFpsPlan:
+    """Integer RIFE multiplier that can land on an exact target fps.
+
+    Duration stays source * multiplier at encode time. Non-integer ratios
+    (24→60 = 2.5×) over-interpolate (5× → 120) so a later fps filter can
+    decimate to the requested rate. Snapping to 2× would yield 48 fps.
+    """
+    if source_fps <= 0 or target_fps <= 0:
+        return RifeFpsPlan(2, max(target_fps, 1), max(target_fps, 1), False)
+
     ratio = target_fps / source_fps
-    if abs(ratio - 4) <= abs(ratio - 2) and ratio >= 3:
-        multiplier = 4
-    else:
-        multiplier = 2
-    return multiplier, source_fps * multiplier
+    if ratio <= 1.02:
+        return RifeFpsPlan(
+            1,
+            source_fps,
+            target_fps,
+            abs(target_fps - source_fps) > 0.08,
+        )
+
+    for multiplier in range(2, MAX_RIFE_MULTIPLIER + 1):
+        dense = source_fps * multiplier
+        step = dense / target_fps
+        nearest = round(step)
+        if nearest >= 1 and abs(step - nearest) <= 0.03:
+            return RifeFpsPlan(
+                multiplier,
+                dense,
+                target_fps,
+                abs(dense - target_fps) > 0.08,
+            )
+
+    multiplier = min(MAX_RIFE_MULTIPLIER, max(2, math.ceil(ratio - 1e-9)))
+    dense = source_fps * multiplier
+    return RifeFpsPlan(multiplier, dense, target_fps, abs(dense - target_fps) > 0.08)
+
+
+def rife_output_fps(source_fps: float, target_fps: float) -> tuple[int, float]:
+    """RIFE multiplier and the dense combine fps (before any resample to target)."""
+    plan = rife_fps_plan(source_fps, target_fps)
+    return plan.multiplier, plan.rife_fps
+
+
+def _fps_node_value(fps: float) -> int | float:
+    rounded = round(fps)
+    if abs(fps - rounded) < 0.02:
+        return int(rounded)
+    return round(fps, 3)
 
 
 def apply_rife_fps(prompt: dict[str, Any], job_input: dict[str, Any] | None) -> dict[str, Any]:
     if not job_input:
+        return prompt
+    if _as_bool(job_input.get("fps_changed")) is False:
         return prompt
     target = _as_float(job_input.get("fps"))
     if target is None:
@@ -109,8 +161,16 @@ def apply_rife_fps(prompt: dict[str, Any], job_input: dict[str, Any] | None) -> 
     source = _as_float(job_input.get("source_fps"))
     multiplier = 2
     frame_rate: float | None = None
+    plan: RifeFpsPlan | None = None
     if source is not None and target is not None:
-        multiplier, frame_rate = rife_output_fps(source, target)
+        plan = rife_fps_plan(source, target)
+        multiplier = plan.multiplier
+        frame_rate = plan.rife_fps
+        extra = f", then resample to {plan.output_fps:g}" if plan.resample else ""
+        print(
+            f"Lumen wrap: RIFE {source:g}→{target:g} via {multiplier}× ({plan.rife_fps:g} fps){extra}",
+            flush=True,
+        )
     elif target is not None:
         frame_rate = target
     for node in prompt.values():
@@ -122,7 +182,7 @@ def apply_rife_fps(prompt: dict[str, Any], job_input: dict[str, Any] | None) -> 
             inputs["fast_mode"] = True
             inputs["clear_cache_after_n_frames"] = 5
         elif class_type == COMBINE_TYPE and frame_rate is not None:
-            inputs["frame_rate"] = frame_rate
+            inputs["frame_rate"] = _fps_node_value(frame_rate)
     return prompt
 
 
@@ -233,7 +293,7 @@ def patch_seedvr2_prompt(
             inputs["blocks_to_swap"] = profile["blocks_to_swap"]
             inputs["swap_io_components"] = True
             inputs["offload_device"] = "cpu"
-    return prompt
+    return apply_rife_fps(prompt, job_input)
 
 
 def cap_resolution(width: int, height: int, job_input: dict[str, Any] | None = None) -> int:

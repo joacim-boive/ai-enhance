@@ -7,6 +7,7 @@ from vram import (
     cap_resolution,
     patch_seedvr2_prompt,
     requested_resolution,
+    rife_fps_plan,
     rife_output_fps,
     should_skip_upscale,
 )
@@ -103,16 +104,29 @@ class VramTests(unittest.TestCase):
         self.assertEqual(patched["26"]["inputs"]["frames"], ["22", 0])
         self.assertNotIn("10", patched)
 
-    def test_rife_output_fps_doubles_24_to_48_not_60(self) -> None:
-        multiplier, fps = rife_output_fps(24, 60)
-        self.assertEqual(multiplier, 2)
-        self.assertEqual(fps, 48)
-        multiplier, fps = rife_output_fps(30, 60)
-        self.assertEqual(multiplier, 2)
-        self.assertEqual(fps, 60)
-        multiplier, fps = rife_output_fps(30, 120)
-        self.assertEqual(multiplier, 4)
-        self.assertEqual(fps, 120)
+    def test_rife_plan_hits_60_from_24_via_5x(self) -> None:
+        plan = rife_fps_plan(24, 60)
+        self.assertEqual(plan.multiplier, 5)
+        self.assertEqual(plan.rife_fps, 120)
+        self.assertEqual(plan.output_fps, 60)
+        self.assertTrue(plan.resample)
+        multiplier, dense = rife_output_fps(24, 60)
+        self.assertEqual(multiplier, 5)
+        self.assertEqual(dense, 120)
+
+        plan = rife_fps_plan(30, 60)
+        self.assertEqual(plan.multiplier, 2)
+        self.assertEqual(plan.rife_fps, 60)
+        self.assertFalse(plan.resample)
+
+        plan = rife_fps_plan(30, 120)
+        self.assertEqual(plan.multiplier, 4)
+        self.assertEqual(plan.rife_fps, 120)
+        self.assertFalse(plan.resample)
+
+        plan = rife_fps_plan(23.976, 59.94)
+        self.assertEqual(plan.multiplier, 5)
+        self.assertTrue(plan.resample)
 
     def test_fps_only_sets_rife_multiplier_and_output_rate(self) -> None:
         patched = patch_seedvr2_prompt(
@@ -128,6 +142,35 @@ class VramTests(unittest.TestCase):
         self.assertFalse(patched["26"]["inputs"]["ensemble"])
         self.assertEqual(patched["25"]["inputs"]["frame_rate"], 60)
         apply_rife_fps(patched, {"fps": 60, "source_fps": 30})
+
+    def test_fps_only_24_to_60_uses_5x_then_120_combine(self) -> None:
+        patched = patch_seedvr2_prompt(
+            copy.deepcopy(INTERP_PROMPT),
+            {
+                "scale_changed": False,
+                "fps_changed": True,
+                "fps": 60,
+                "source_fps": 24,
+            },
+        )
+        self.assertEqual(patched["26"]["inputs"]["multiplier"], 5)
+        self.assertEqual(patched["25"]["inputs"]["frame_rate"], 120)
+        self.assertNotIn("10", patched)
+
+    def test_upscale_and_fps_still_sets_rife_for_24_to_60(self) -> None:
+        patched = patch_seedvr2_prompt(
+            copy.deepcopy(INTERP_PROMPT),
+            {
+                "scale_changed": True,
+                "fps_changed": True,
+                "fps": 60,
+                "source_fps": 24,
+                "resolution": 2160,
+            },
+        )
+        self.assertIn("10", patched)
+        self.assertEqual(patched["26"]["inputs"]["multiplier"], 5)
+        self.assertEqual(patched["25"]["inputs"]["frame_rate"], 120)
 
 if __name__ == "__main__":
     unittest.main()

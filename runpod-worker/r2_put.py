@@ -26,7 +26,7 @@ def upload_master(job_input: dict[str, Any], output: Any) -> dict[str, Any]:
     object_key = job_input.get("object_key")
     upload_url = job_input.get("upload_url")
     if not isinstance(object_key, str) or not isinstance(upload_url, str):
-        return attach_local_output(output)
+        return attach_local_output(output, job_input)
 
     path = _find_video_path(output)
     if path is None:
@@ -36,6 +36,7 @@ def upload_master(job_input: dict[str, Any], output: Any) -> dict[str, Any]:
     if path is None or not os.path.isfile(path):
         raise RuntimeError("GPU finished but no mp4 was found to upload.")
 
+    path = conform_output_fps(path, job_input)
     size = os.path.getsize(path)
     probe = probe_video(path)
     content_type = str(job_input.get("content_type") or "video/mp4")
@@ -103,7 +104,7 @@ def probe_video(path: str) -> dict[str, Any]:
         return {}
 
 
-def attach_local_output(output: Any) -> dict[str, Any]:
+def attach_local_output(output: Any, job_input: dict[str, Any] | None = None) -> dict[str, Any]:
     """Hub often returns only a worker-local path. Inline small files so we can inspect fps."""
     result = dict(output) if isinstance(output, dict) else {"output": output}
     path = _find_video_path(result)
@@ -111,6 +112,9 @@ def attach_local_output(output: Any) -> dict[str, Any]:
         path = _newest_mp4()
     if path is None or not os.path.isfile(path):
         return result
+    if job_input:
+        path = conform_output_fps(path, job_input)
+        result["video_path"] = path
     probe = probe_video(path)
     if probe:
         result["probe"] = probe
@@ -121,6 +125,94 @@ def attach_local_output(output: Any) -> dict[str, Any]:
         result.setdefault("video_path", path)
         print(f"Lumen wrap: attached inline video ({size} bytes)", flush=True)
     return result
+
+
+def job_target_fps(job_input: dict[str, Any] | None) -> float | None:
+    if not job_input:
+        return None
+    for key in ("fps", "target_fps"):
+        raw = job_input.get(key)
+        if isinstance(raw, bool) or raw is None:
+            continue
+        try:
+            number = float(raw)
+        except (TypeError, ValueError):
+            continue
+        if number > 0:
+            return number
+    return None
+
+
+def fps_filter_value(fps: float) -> str:
+    if abs(fps - 23.976) < 0.02:
+        return "24000/1001"
+    if abs(fps - 29.97) < 0.02:
+        return "30000/1001"
+    if abs(fps - 59.94) < 0.02:
+        return "60000/1001"
+    rounded = round(fps)
+    if abs(fps - rounded) < 0.02:
+        return str(int(rounded))
+    return f"{fps:.3f}".rstrip("0").rstrip(".")
+
+
+def conform_output_fps(path: str, job_input: dict[str, Any] | None) -> str:
+    """Decimate a denser RIFE encode (e.g. 120 fps) down to the requested rate (60)."""
+    target = job_target_fps(job_input)
+    if target is None:
+        return path
+    probe = probe_video(path)
+    current = probe.get("fps")
+    if not isinstance(current, (int, float)):
+        return path
+    if float(current) <= target + 0.15:
+        return path
+    dest = _resampled_path(path, target)
+    _ffmpeg_fps(path, dest, target)
+    print(f"Lumen wrap: resampled {float(current):g} fps → {target:g} fps", flush=True)
+    return dest
+
+
+def _resampled_path(path: str, fps: float) -> str:
+    directory, name = os.path.split(path)
+    stem, ext = os.path.splitext(name)
+    label = fps_filter_value(fps).replace("/", "-")
+    return os.path.join(directory or tempfile.gettempdir(), f"{stem}-{label}fps{ext or '.mp4'}")
+
+
+def _ffmpeg_fps(src: str, dest: str, fps: float) -> None:
+    fps_arg = fps_filter_value(fps)
+    common = [
+        "ffmpeg",
+        "-y",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-i",
+        src,
+        "-map",
+        "0:v:0",
+        "-map",
+        "0:a:0?",
+        "-vf",
+        f"fps={fps_arg}",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "fast",
+        "-crf",
+        "16",
+        "-pix_fmt",
+        "yuv420p",
+        "-movflags",
+        "+faststart",
+    ]
+    try:
+        subprocess.check_call(common + ["-c:a", "copy", dest], timeout=3600)
+        return
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        pass
+    subprocess.check_call(common + ["-c:a", "aac", "-b:a", "192k", dest], timeout=3600)
 
 
 def _fps_from_rate(rate: str | None) -> float | None:

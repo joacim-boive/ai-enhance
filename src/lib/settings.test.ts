@@ -77,7 +77,7 @@ test("fps-only GPU jobs label as RIFE without SeedVR2", () => {
   );
   assert.equal(
     enhanceEngineCopy({ fpsChanged: true, scaleChanged: false }),
-    "Frame interpolation runs RIFE 4.9 on the RTX 4090. SeedVR2 is skipped.",
+    "Frame interpolation runs RIFE 4.9 on the RTX 4090 to the selected frame rate, including 24→60. SeedVR2 is skipped.",
   );
 });
 
