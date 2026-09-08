@@ -5,6 +5,7 @@ import {
   groupFamilies,
   historyEntries,
   latestVersion,
+  removeClipFromFamilies,
   versionCount,
 } from "./library-tree";
 import { settingsFromPreset } from "./settings";
@@ -140,4 +141,23 @@ test("in-progress jobs hang off the source clip", () => {
   assert.equal(pending?.kind, "job");
   assert.equal(pending?.parentId, root.id);
   assert.equal(pending?.status, "processing");
+});
+
+test("removeClipFromFamilies removes original and its family", () => {
+  const families = groupFamilies([root, cinema, hfr], []);
+  assert.equal(families.length, 1);
+  const updated = removeClipFromFamilies(families, root);
+  assert.equal(updated.length, 0);
+});
+
+test("removeClipFromFamilies removes version and its descendants optimistically", () => {
+  const families = groupFamilies([root, cinema, hfr, sibling], []);
+  assert.equal(families[0]?.clips.length, 4);
+
+  // Deleting cinema should also remove hfr (descendant of cinema), but keep root and sibling
+  const updated = removeClipFromFamilies(families, cinema);
+  assert.equal(updated.length, 1);
+  assert.equal(updated[0]?.clips.length, 2);
+  const remainingIds = updated[0]?.clips.map((c) => c.id).sort();
+  assert.deepEqual(remainingIds, [root.id, sibling.id].sort());
 });

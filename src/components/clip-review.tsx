@@ -20,7 +20,6 @@ type Props = {
   family: LibraryFamily;
   selected: PublicClip;
   history: HistoryEntry[];
-  deleting: boolean;
   onSelect: (clip: PublicClip) => void;
   onDelete: (clip: PublicClip) => void;
   onClose: () => void;
@@ -30,7 +29,6 @@ export function ClipReview({
   family,
   selected,
   history,
-  deleting,
   onSelect,
   onDelete,
   onClose,
@@ -102,11 +100,10 @@ export function ClipReview({
           </a>
           <button
             type="button"
-            disabled={deleting}
             onClick={() => onDelete(selected)}
-            className={`${ACTION} border-[var(--line)] text-[var(--err)] hover:border-[var(--err)] disabled:opacity-40`}
+            className={`${ACTION} border-[var(--line)] text-[var(--err)] hover:border-[var(--err)]`}
           >
-            {deleting ? "Deleting…" : selected.kind === "original" ? "Delete clip" : "Delete version"}
+            {selected.kind === "original" ? "Delete clip" : "Delete version"}
           </button>
         </div>
         <div className="border-t border-[var(--line)] px-5 py-5">
