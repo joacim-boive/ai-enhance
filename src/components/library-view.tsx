@@ -25,7 +25,6 @@ export function LibraryView() {
   const [loading, setLoading] = useState(true);
   const [selectedRootId, setSelectedRootId] = useState<string | null>(null);
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
-  const [deleting, setDeleting] = useState(false);
   const [confirm, setConfirm] = useState<PublicClip | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
 
@@ -150,7 +149,6 @@ export function LibraryView() {
       }
     }
 
-    setDeleting(true);
     try {
       const response = await fetch(`/api/clips/${clip.id}`, { method: "DELETE" });
       if (!response.ok) {
@@ -177,8 +175,6 @@ export function LibraryView() {
         title: "Delete failed",
         body: `Could not delete "${clip.name}". The item has been restored.`,
       });
-    } finally {
-      setDeleting(false);
     }
   }
 
@@ -210,7 +206,6 @@ export function LibraryView() {
           family={selectedFamily}
           selected={selectedClip}
           history={history}
-          deleting={deleting}
           onSelect={(clip) => {
             setSelectedClipId(clip.id);
             const url = new URL(window.location.href);

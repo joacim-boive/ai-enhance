@@ -20,7 +20,6 @@ type Props = {
   family: LibraryFamily;
   selected: PublicClip;
   history: HistoryEntry[];
-  deleting?: boolean;
   onSelect: (clip: PublicClip) => void;
   onDelete: (clip: PublicClip) => void;
   onClose: () => void;
@@ -30,7 +29,6 @@ export function ClipReview({
   family,
   selected,
   history,
-  deleting,
   onSelect,
   onDelete,
   onClose,
