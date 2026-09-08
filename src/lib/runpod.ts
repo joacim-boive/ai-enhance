@@ -119,7 +119,10 @@ async function fetchGpuWorkers(): Promise<{
   }
 }
 
-function taskTypeFor(scaleChanged: boolean, fpsChanged: boolean): "upscale" | "upscale_and_interpolation" {
+export function gpuTaskType(
+  scaleChanged: boolean,
+  fpsChanged: boolean,
+): "upscale" | "upscale_and_interpolation" {
   if (fpsChanged) {
     return "upscale_and_interpolation";
   }
@@ -127,6 +130,27 @@ function taskTypeFor(scaleChanged: boolean, fpsChanged: boolean): "upscale" | "u
     return "upscale";
   }
   return "upscale_and_interpolation";
+}
+
+/** Hub has no interpolation-only workflow; the wrap strips SeedVR2 when this is true. */
+export function gpuSkipUpscale(scaleChanged: boolean, fpsChanged: boolean): boolean {
+  return fpsChanged && !scaleChanged;
+}
+
+export function gpuWarmupMessage(input: {
+  scaleChanged: boolean;
+  fpsChanged: boolean;
+  hubCapped: boolean;
+  hubResolution: number;
+  hubDefault: number;
+}): string {
+  if (gpuSkipUpscale(input.scaleChanged, input.fpsChanged)) {
+    return "Submitting to the RTX 4090 for RIFE interpolation only. SeedVR2 upscale is skipped.";
+  }
+  if (input.hubCapped) {
+    return `Submitting to the RTX 4090. SeedVR2 short side is ${input.hubResolution}px (the stock Hub would ask for ${input.hubDefault}px and run out of VRAM).`;
+  }
+  return "Submitting to the SeedVR2 / RIFE worker on RTX 4090. First boot can take a few minutes.";
 }
 
 export type GpuMultipartGrant = {
@@ -158,13 +182,16 @@ export async function submitGpuJob(input: {
     throw new Error("GPU is not configured");
   }
   const body: Record<string, unknown> = {
-    task_type: taskTypeFor(input.scaleChanged, input.fpsChanged),
+    task_type: gpuTaskType(input.scaleChanged, input.fpsChanged),
     network_volume: false,
     video_url: input.videoUrl,
     upload_url: input.uploadUrl,
     object_key: input.objectKey,
     content_type: input.contentType,
     resolution: input.resolution,
+    scale_changed: input.scaleChanged,
+    fps_changed: input.fpsChanged,
+    skip_upscale: gpuSkipUpscale(input.scaleChanged, input.fpsChanged),
     multipart: {
       uploadId: input.multipart.uploadId,
       partSize: input.multipart.partSize,
