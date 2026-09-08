@@ -21,6 +21,11 @@ import {
   uploadFileToR2,
 } from "./r2";
 import {
+  isTerminalJobStatus,
+  jobNeedsDispatch,
+  jobNeedsGpuFollow,
+} from "./job-lifecycle";
+import {
   cancelGpuJob,
   getGpuJobStatus,
   gpuOutputLooksLikeBytes,
@@ -45,6 +50,7 @@ import { isHttpUrl } from "./url";
 
 const queue: string[] = [];
 let draining = false;
+const inFlight = new Set<string>();
 
 export function startJob(id: string): void {
   if (isVercel()) {
@@ -54,13 +60,32 @@ export function startJob(id: string): void {
   enqueueJob(id);
 }
 
+export async function ensureJobRunning(id: string): Promise<void> {
+  if (inFlight.has(id)) {
+    return;
+  }
+  const job = await loadJob(id);
+  if (!job || isTerminalJobStatus(job.status)) {
+    return;
+  }
+  if (jobNeedsGpuFollow(job) || jobNeedsDispatch(job)) {
+    void processJobSafe(id);
+  }
+}
+
 export async function processJobSafe(id: string): Promise<void> {
+  if (inFlight.has(id)) {
+    return;
+  }
+  inFlight.add(id);
   try {
     await processJob(id);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
     console.error(`Job ${id} failed`, error);
     await failJob(id, message);
+  } finally {
+    inFlight.delete(id);
   }
 }
 
@@ -108,30 +133,13 @@ async function sourceInput(job: Job): Promise<string> {
 
 async function processJob(id: string): Promise<void> {
   const job = await loadJob(id);
-  if (!job || job.status === "cancelled" || job.status === "complete") {
+  if (!job || isTerminalJobStatus(job.status)) {
     return;
   }
   const controller = getAbortController(id);
-  await patchJob(id, {
-    status: "probing",
-    stage: "Reading source",
-    startedAt: Date.now(),
-    progress: 4,
-  });
-  await appendEvent(id, {
-    stage: "Reading source",
-    message: "Probing codec, resolution, and frame rate.",
-    progress: 4,
-    level: "info",
-  });
-
   const input = await sourceInput(job);
-  const meta = await probeVideo(input);
-  const thumbs = await extractThumbnails(input, id, 8, meta.durationSec, {
-    userId: job.userId,
-    kind: "job",
-  });
-  await patchJob(id, { sourceMeta: meta, thumbs });
+  const meta = await ensureSourceMeta(job, input);
+  void fillJobThumbs(job, input, meta).catch(() => undefined);
 
   if (isNoOp(meta, job.settings)) {
     await completeJob(id, "cpu", "Nothing to change — returning the original master.", null, {
@@ -159,10 +167,12 @@ async function processJob(id: string): Promise<void> {
 
   let usedEngine: Engine = "cpu";
   let fallbackReason: string | null = null;
+  const latest = (await loadJob(id)) ?? job;
+  const gpuJob = { ...latest, sourceMeta: meta };
 
   if (preferGpu) {
     try {
-      usedEngine = await runGpu({ ...job, sourceMeta: meta }, controller.signal, target);
+      usedEngine = await runGpu(gpuJob, controller.signal, target);
     } catch (error) {
       if (controller.signal.aborted) {
         await patchJob(id, { status: "cancelled", stage: "Cancelled", error: "Cancelled" });
@@ -219,24 +229,92 @@ async function processJob(id: string): Promise<void> {
   await completeJob(id, usedEngine, null, fallbackReason);
 }
 
-async function runGpu(
-  job: Job,
-  signal: AbortSignal,
-  target: OutputTarget,
-): Promise<Engine> {
-  if (!r2Enabled()) {
-    throw new Error("Cloudflare R2 is required so the GPU worker can upload a private master.");
+async function ensureSourceMeta(job: Job, input: string): Promise<NonNullable<Job["sourceMeta"]>> {
+  if (job.sourceMeta) {
+    return job.sourceMeta;
   }
-  const meta = job.sourceMeta;
+  await patchJob(job.id, {
+    status: "probing",
+    stage: "Reading source",
+    startedAt: job.startedAt ?? Date.now(),
+    progress: 4,
+  });
+  await appendEvent(job.id, {
+    stage: "Reading source",
+    message: "Probing codec, resolution, and frame rate.",
+    progress: 4,
+    level: "info",
+  });
+  const meta = await probeVideo(input);
+  await patchJob(job.id, { sourceMeta: meta });
+  return meta;
+}
+
+async function fillJobThumbs(
+  job: Job,
+  input: string,
+  meta: NonNullable<Job["sourceMeta"]>,
+): Promise<void> {
+  if (job.thumbs.length > 0) {
+    return;
+  }
+  const thumbs = await extractThumbnails(input, job.id, 8, meta.durationSec, {
+    userId: job.userId,
+    kind: "job",
+  });
+  if (thumbs.length > 0) {
+    await patchJob(job.id, { thumbs });
+  }
+}
+
+export async function submitGpuIfReady(job: Job): Promise<Job> {
+  if (job.runpodJobId || !job.sourceMeta || !r2Enabled() || !isGpuConfigured()) {
+    return job;
+  }
+  if (isNoOp(job.sourceMeta, job.settings)) {
+    return job;
+  }
+  const target = resolveOutputTarget(job.sourceMeta, job.settings);
+  if (
+    !preferGpuEngine({
+      enginePreference: job.settings.enginePreference,
+      gpuConfigured: true,
+      scaleChanged: target.scaleChanged,
+      fpsChanged: target.fpsChanged,
+    })
+  ) {
+    return job;
+  }
+  try {
+    await patchJob(job.id, {
+      status: "warming",
+      engine: "gpu",
+      startedAt: job.startedAt ?? Date.now(),
+      progress: 8,
+    });
+    await dispatchGpu(job, target);
+    return (await loadJob(job.id)) ?? job;
+  } catch (error) {
+    console.error(`Immediate GPU submit failed for ${job.id}`, error);
+    return job;
+  }
+}
+
+async function dispatchGpu(job: Job, target: OutputTarget): Promise<string> {
+  const existing = await loadJob(job.id);
+  if (existing?.runpodJobId) {
+    return existing.runpodJobId;
+  }
+  const meta = existing?.sourceMeta ?? job.sourceMeta;
   if (!meta) {
     throw new Error("Missing source metadata");
   }
   const hub = gpuHubResolution(meta, target);
-
   await patchJob(job.id, {
     status: "warming",
     engine: "gpu",
     stage: "Warming GPU",
+    startedAt: existing?.startedAt ?? job.startedAt ?? Date.now(),
     progress: 8,
   });
   await appendEvent(job.id, {
@@ -272,10 +350,24 @@ async function runGpu(
   await patchJob(job.id, { runpodJobId, status: "processing", stage: "Enhancing on GPU" });
   await appendEvent(job.id, {
     stage: "Enhancing on GPU",
-    message: "Worker streams the master to private R2. This app never downloads the file.",
+    message: "Queued on Runpod. The worker streams the master to private R2.",
     progress: 18,
     level: "info",
   });
+  return runpodJobId;
+}
+
+async function runGpu(
+  job: Job,
+  signal: AbortSignal,
+  target: OutputTarget,
+): Promise<Engine> {
+  if (!r2Enabled()) {
+    throw new Error("Cloudflare R2 is required so the GPU worker can upload a private master.");
+  }
+
+  const current = (await loadJob(job.id)) ?? job;
+  const runpodJobId = current.runpodJobId ?? (await dispatchGpu(current, target));
 
   let ticks = 18;
   const pulse = setInterval(() => {
@@ -293,7 +385,9 @@ async function runGpu(
     await persistGpuObject(job, output);
     return "gpu";
   } catch (error) {
-    void cancelGpuJob(runpodJobId);
+    if (signal.aborted) {
+      void cancelGpuJob(runpodJobId);
+    }
     throw error;
   } finally {
     clearInterval(pulse);
