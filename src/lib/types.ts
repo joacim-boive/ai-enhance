@@ -28,6 +28,8 @@ export type VideoMeta = {
   sizeBytes: number;
   frameCount: number | null;
   pixelFormat: string | null;
+  /** Clockwise degrees needed to show the coded pixels upright. */
+  rotation?: number;
 };
 
 export type JobSettings = {

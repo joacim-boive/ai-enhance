@@ -3,13 +3,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { KeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
 import {
-  aspectRatioForMeta,
+  compareFrameAspect,
   formatDuration,
   formatFps,
   formatResolution,
 } from "@/lib/format";
 import { withDownloadParam } from "@/lib/url";
 import type { PublicJob } from "@/lib/types";
+import { MediaFrame } from "./media-frame";
 
 type ViewMode = "split" | "side-by-side" | "toggle";
 
@@ -41,8 +42,8 @@ export function ComparisonViewer({ job, onContinue, onClose }: Props) {
 
   const out = job.outputMeta;
   const src = job.sourceMeta;
-  const targetMeta = out ?? src;
-  const aspect = aspectRatioForMeta(targetMeta);
+  const frameMeta = src ?? out;
+  const aspect = compareFrameAspect(frameMeta, mode);
 
   const updateSplitFromPointer = useCallback((clientX: number) => {
     const container = containerRef.current;
@@ -367,14 +368,14 @@ export function ComparisonViewer({ job, onContinue, onClose }: Props) {
       </div>
 
       {/* Main Video Viewport */}
-      <div
-        ref={containerRef}
+      <MediaFrame
+        aspect={aspect}
+        frameRef={containerRef}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerUp}
-        style={{ aspectRatio: aspect }}
-        className={`relative flex max-h-[75vh] w-full select-none items-center justify-center overflow-hidden bg-black ${
+        className={`flex w-full select-none items-center justify-center ${
           mode === "split" ? "cursor-ew-resize touch-none" : ""
         }`}
       >
@@ -523,7 +524,7 @@ export function ComparisonViewer({ job, onContinue, onClose }: Props) {
             )}
           </>
         )}
-      </div>
+      </MediaFrame>
 
       {/* Synchronized Playback Control Bar */}
       <div className="border-t border-[var(--line)] bg-[var(--bg-2)] px-6 py-3">

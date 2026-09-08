@@ -38,6 +38,65 @@ export function formatResolution(width: number, height: number): string {
   return `${width}×${height}`;
 }
 
+export type ProbeRotationSource = {
+  tags?: { rotate?: string };
+  side_data_list?: { rotation?: number | string; side_data_type?: string }[];
+};
+
+export function normalizeRotation(degrees: number): number {
+  if (!Number.isFinite(degrees)) {
+    return 0;
+  }
+  return ((Math.round(degrees) % 360) + 360) % 360;
+}
+
+export function rotationFromProbe(stream: ProbeRotationSource): number {
+  const matrix = stream.side_data_list?.find((entry) => {
+    if (entry.rotation === undefined || entry.rotation === "") {
+      return false;
+    }
+    return Number.isFinite(Number(entry.rotation));
+  });
+  if (matrix) {
+    // ffprobe prints av_display_rotation_get(); ffmpeg autorotate negates it.
+    return normalizeRotation(-Number(matrix.rotation));
+  }
+  const tag = stream.tags?.rotate;
+  if (tag !== undefined && tag !== "") {
+    const parsed = Number(tag);
+    if (Number.isFinite(parsed)) {
+      return normalizeRotation(parsed);
+    }
+  }
+  return 0;
+}
+
+export function displaySize(
+  width: number,
+  height: number,
+  rotation = 0,
+): { width: number; height: number } {
+  const turns = normalizeRotation(rotation);
+  if (turns === 90 || turns === 270) {
+    return { width: height, height: width };
+  }
+  return { width, height };
+}
+
+export function transposeFilter(rotation = 0): string | null {
+  const turns = normalizeRotation(rotation);
+  if (turns === 90) {
+    return "transpose=1";
+  }
+  if (turns === 180) {
+    return "hflip,vflip";
+  }
+  if (turns === 270) {
+    return "transpose=2";
+  }
+  return null;
+}
+
 export function aspectRatioForMeta(
   meta: { width?: number; height?: number } | null | undefined,
   fallback = "16 / 9",
@@ -52,6 +111,40 @@ export function aspectRatioForMeta(
     return `${meta.width} / ${meta.height}`;
   }
   return fallback;
+}
+
+export function compareFrameAspect(
+  meta: { width?: number; height?: number } | null | undefined,
+  mode: "split" | "side-by-side" | "toggle",
+): string {
+  const base = aspectRatioForMeta(meta);
+  if (mode !== "side-by-side" || !meta?.width || !meta.height || meta.width <= 0 || meta.height <= 0) {
+    return base;
+  }
+  return `${meta.width * 2} / ${meta.height}`;
+}
+
+export function aspectRatioNumber(aspect: string): number {
+  const [width, height] = aspect.split("/").map((part) => Number(part.trim()));
+  if (width > 0 && height > 0) {
+    return width / height;
+  }
+  return 16 / 9;
+}
+
+export type MediaFrameStyle = {
+  aspectRatio: string;
+  width: string;
+  maxHeight: string;
+};
+
+export function mediaFrameStyle(aspect: string, maxHeight = "75vh"): MediaFrameStyle {
+  const ratio = aspectRatioNumber(aspect);
+  return {
+    aspectRatio: aspect,
+    width: `min(100%, calc(${maxHeight} * ${ratio}))`,
+    maxHeight,
+  };
 }
 
 export function parseFrameRate(rate: string | undefined): number {

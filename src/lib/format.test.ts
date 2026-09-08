@@ -1,6 +1,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { aspectRatioForMeta, formatCodec, formatDate } from "./format";
+import {
+  aspectRatioForMeta,
+  aspectRatioNumber,
+  compareFrameAspect,
+  displaySize,
+  formatCodec,
+  formatDate,
+  mediaFrameStyle,
+  normalizeRotation,
+  rotationFromProbe,
+  transposeFilter,
+} from "./format";
 
 test("formatDate returns a readable stamp", () => {
   assert.equal(formatDate(0), "—");
@@ -23,4 +34,43 @@ test("aspectRatioForMeta preserves ratio and supports custom fallbacks", () => {
   assert.equal(aspectRatioForMeta(null), "16 / 9");
   assert.equal(aspectRatioForMeta(undefined, "4 / 3"), "4 / 3");
   assert.equal(aspectRatioForMeta({ width: 0, height: 0 }), "16 / 9");
+});
+
+test("rotation metadata swaps coded 16:9 phone video to display 9:16", () => {
+  assert.equal(normalizeRotation(-90), 270);
+  assert.equal(rotationFromProbe({ tags: { rotate: "90" } }), 90);
+  assert.equal(
+    rotationFromProbe({
+      side_data_list: [{ side_data_type: "Display Matrix", rotation: -90 }],
+    }),
+    90,
+  );
+  assert.equal(
+    rotationFromProbe({
+      tags: { rotate: "90" },
+      side_data_list: [{ side_data_type: "Display Matrix", rotation: -90 }],
+    }),
+    90,
+  );
+  assert.deepEqual(displaySize(3840, 2160, 90), { width: 2160, height: 3840 });
+  assert.deepEqual(displaySize(3840, 2160, 270), { width: 2160, height: 3840 });
+  assert.deepEqual(displaySize(3840, 2160, 0), { width: 3840, height: 2160 });
+  assert.equal(transposeFilter(90), "transpose=1");
+  assert.equal(transposeFilter(270), "transpose=2");
+  assert.equal(transposeFilter(0), null);
+});
+
+test("compare overlay keeps source aspect and doubles it for side-by-side", () => {
+  const portrait = { width: 2160, height: 3840 };
+  assert.equal(compareFrameAspect(portrait, "split"), "2160 / 3840");
+  assert.equal(compareFrameAspect(portrait, "side-by-side"), "4320 / 3840");
+  assert.equal(compareFrameAspect(null, "split"), "16 / 9");
+});
+
+test("media frame width is capped by height so 9:16 is not stretched to 16:9", () => {
+  const portrait = mediaFrameStyle("2160 / 3840");
+  assert.equal(portrait.aspectRatio, "2160 / 3840");
+  assert.equal(portrait.maxHeight, "75vh");
+  assert.equal(portrait.width, "min(100%, calc(75vh * 0.5625))");
+  assert.equal(aspectRatioNumber("16 / 9"), 16 / 9);
 });

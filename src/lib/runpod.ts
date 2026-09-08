@@ -178,6 +178,7 @@ export async function submitGpuJob(input: {
   fps?: number;
   sourceFps?: number;
   resolution: number;
+  rotation?: number;
 }): Promise<string> {
   const { apiKey, endpointId } = runpodConfig();
   if (!apiKey) {
@@ -196,6 +197,7 @@ export async function submitGpuJob(input: {
     skip_upscale: gpuSkipUpscale(input.scaleChanged, input.fpsChanged),
     fps: input.fps,
     source_fps: input.sourceFps,
+    rotation: input.rotation ?? 0,
     multipart: {
       uploadId: input.multipart.uploadId,
       partSize: input.multipart.partSize,

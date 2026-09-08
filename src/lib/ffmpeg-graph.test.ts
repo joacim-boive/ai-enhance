@@ -34,6 +34,21 @@ test("fast fallback uses blend interpolation", () => {
   assert.equal(graph, "minterpolate=fps=60:mi_mode=blend");
 });
 
+test("rotated sources bake transpose before other filters", () => {
+  const graph = buildVideoFilters({
+    width: 2160,
+    height: 3840,
+    fps: 48,
+    scaleChanged: false,
+    fpsChanged: true,
+    denoise: false,
+    sharpen: false,
+    quality: "fast",
+    rotation: 90,
+  });
+  assert.equal(graph, "transpose=1,minterpolate=fps=48:mi_mode=blend");
+});
+
 test("ffmpeg args enable http reconnect for remote inputs", () => {
   const args = ffmpegArgs({
     inputPath: "https://blob.example/video.mp4",
@@ -43,6 +58,8 @@ test("ffmpeg args enable http reconnect for remote inputs", () => {
   });
   assert.ok(args.includes("-protocol_whitelist"));
   assert.ok(args.includes("-reconnect"));
+  assert.ok(args.includes("-noautorotate"));
+  assert.ok(args.indexOf("-noautorotate") < args.indexOf("-i"));
 });
 
 test("ffmpeg args map audio when present", () => {

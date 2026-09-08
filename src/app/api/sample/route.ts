@@ -25,6 +25,7 @@ export async function POST(): Promise<Response> {
       SAMPLE_FILE_ID,
       8,
       meta.durationSec,
+      { rotation: meta.rotation },
     );
     const clip = await ensureOriginalClip({
       userId: session.userId,

@@ -12,6 +12,7 @@ import {
 import { engineLabel } from "@/lib/settings";
 import type { LibraryFamily, PublicClip } from "@/lib/types";
 import { ClipStats, downloadHrefFor, downloadNameFor } from "./clip-stats";
+import { MediaFrame } from "./media-frame";
 
 const ACTION =
   "inline-flex h-10 shrink-0 items-center justify-center rounded-full border px-4 text-xs uppercase leading-none tracking-[0.16em]";
@@ -59,10 +60,7 @@ export function ClipReview({
             All clips
           </button>
         </div>
-        <div
-          className="relative flex max-h-[75vh] w-full items-center justify-center overflow-hidden bg-black"
-          style={{ aspectRatio: aspect }}
-        >
+        <MediaFrame aspect={aspect} className="flex w-full items-center justify-center">
           <video
             key={selected.id}
             src={selected.url}
@@ -71,7 +69,7 @@ export function ClipReview({
             poster={selected.thumbs[0]}
             className="h-full w-full object-contain"
           />
-        </div>
+        </MediaFrame>
         {selected.thumbs.length > 1 ? (
           <div className="flex gap-1 overflow-x-auto border-t border-[var(--line)] p-2">
             {selected.thumbs.map((thumb) => (

@@ -280,6 +280,7 @@ async function fillJobThumbs(
   const thumbs = await extractThumbnails(input, job.id, 8, meta.durationSec, {
     userId: job.userId,
     kind: "job",
+    rotation: meta.rotation,
   });
   if (thumbs.length > 0) {
     await patchJob(job.id, { thumbs });
@@ -371,6 +372,7 @@ async function dispatchGpu(job: Job, target: OutputTarget): Promise<string> {
     fps: target.fps,
     sourceFps: meta.fps,
     resolution: hub.resolution,
+    rotation: meta.rotation,
   });
   await patchJob(job.id, { runpodJobId, status: "processing", stage: "Enhancing on GPU" });
   await appendEvent(job.id, {

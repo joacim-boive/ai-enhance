@@ -156,10 +156,17 @@ function fitWithin(
   maxWidth: number,
   maxHeight: number,
 ): { width: number; height: number } {
-  const scale = Math.min(maxWidth / width, maxHeight / height, 4);
-  const nextWidth = even(width * Math.max(scale, 1));
-  const nextHeight = even(height * Math.max(scale, 1));
-  return { width: nextWidth, height: nextHeight };
+  const maxLong = Math.max(maxWidth, maxHeight);
+  const maxShort = Math.min(maxWidth, maxHeight);
+  const scale = Math.min(
+    maxLong / Math.max(width, height),
+    maxShort / Math.min(width, height),
+    4,
+  );
+  return {
+    width: even(width * Math.max(scale, 1)),
+    height: even(height * Math.max(scale, 1)),
+  };
 }
 
 export function requestedOutputSize(
