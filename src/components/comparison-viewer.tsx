@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { formatFps, formatResolution } from "@/lib/format";
+import { aspectRatioForMeta, formatFps, formatResolution } from "@/lib/format";
 import { withDownloadParam } from "@/lib/url";
 import type { PublicJob } from "@/lib/types";
 
@@ -50,6 +50,8 @@ export function ComparisonViewer({ job, onContinue }: Props) {
 
   const out = job.outputMeta;
   const src = job.sourceMeta;
+  const targetMeta = out ?? src;
+  const aspect = aspectRatioForMeta(targetMeta);
 
   return (
     <section className="panel mt-6 overflow-hidden rounded-[28px]">
@@ -85,7 +87,10 @@ export function ComparisonViewer({ job, onContinue }: Props) {
           ) : null}
         </div>
       </div>
-      <div className="relative aspect-video bg-black">
+      <div
+        className="relative flex max-h-[75vh] w-full items-center justify-center overflow-hidden bg-black"
+        style={{ aspectRatio: aspect }}
+      >
         <video
           ref={outputRef}
           src={job.outputUrl ?? undefined}

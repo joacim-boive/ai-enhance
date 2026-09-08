@@ -1,7 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { formatBytes, formatDuration, formatFps, formatResolution } from "@/lib/format";
+import {
+  aspectRatioForMeta,
+  formatBytes,
+  formatDuration,
+  formatFps,
+  formatResolution,
+} from "@/lib/format";
 import type { BenchSource } from "@/lib/types";
 
 type Props = {
@@ -11,9 +17,13 @@ type Props = {
 
 export function SourceStage({ file, onClear }: Props) {
   const { meta } = file;
+  const aspect = aspectRatioForMeta(meta);
   return (
     <div className="panel overflow-hidden rounded-[28px]">
-      <div className="relative aspect-video bg-black">
+      <div
+        className="relative flex max-h-[75vh] w-full items-center justify-center overflow-hidden bg-black"
+        style={{ aspectRatio: aspect }}
+      >
         <video
           src={file.url}
           controls
