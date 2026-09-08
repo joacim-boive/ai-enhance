@@ -50,6 +50,45 @@ export type JobEvent = {
   level: JobEventLevel;
 };
 
+export type ClipKind = "original" | "version";
+
+export type Clip = {
+  id: string;
+  userId: string;
+  name: string;
+  kind: ClipKind;
+  rootClipId: string;
+  parentClipId: string | null;
+  fileId: string | null;
+  jobId: string | null;
+  treatment: string | null;
+  settings: JobSettings | null;
+  engine: Engine | null;
+  pathname: string;
+  url: string;
+  objectKey: string | null;
+  thumbs: string[];
+  meta: VideoMeta | null;
+  createdAt: number;
+  updatedAt: number;
+};
+
+export type PublicClip = Omit<Clip, "pathname" | "objectKey">;
+
+export type BenchSource = {
+  id: string;
+  clipId: string;
+  fileId: string | null;
+  name: string;
+  url: string;
+  meta: VideoMeta;
+  thumbs: string[];
+  kind: ClipKind;
+  treatment: string | null;
+  parentClipId: string | null;
+  rootClipId: string;
+};
+
 export type Job = {
   id: string;
   userId: string;
@@ -57,6 +96,8 @@ export type Job = {
   status: JobStatus;
   engine: Engine | null;
   settings: JobSettings;
+  sourceClipId: string | null;
+  outputClipId: string | null;
   sourcePath: string;
   sourceUrl: string;
   sourceObjectKey: string | null;
@@ -91,6 +132,12 @@ export type PublicJob = Omit<
   | "outputEtag"
   | "outputMultipartUploadId"
 >;
+
+export type LibraryFamily = {
+  root: PublicClip;
+  clips: PublicClip[];
+  jobs: PublicJob[];
+};
 
 export type HostEnvironment = "production" | "preview" | "development" | "local";
 

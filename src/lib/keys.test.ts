@@ -1,9 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  clipRecordKey,
+  jobObjectsPrefix,
   jobOutputKey,
   jobRecordKey,
   ownsObjectKey,
+  parseClipIdFromRecordKey,
+  parseFileIdFromUploadKey,
   parseJobIdFromRecordKey,
   uploadObjectKey,
 } from "./keys";
@@ -18,6 +22,11 @@ test("job output keys are user-scoped", () => {
   assert.equal(ownsObjectKey(userId, jobOutputKey(userId, jobId)), true);
   assert.equal(ownsObjectKey(userId, `users/${jobId}/jobs/${jobId}/output.mp4`), false);
   assert.equal(parseJobIdFromRecordKey(jobRecordKey(userId, jobId)), jobId);
+  assert.equal(jobObjectsPrefix(userId, jobId), `users/${userId}/jobs/${jobId}/`);
+  assert.equal(clipRecordKey(userId, jobId), `users/${userId}/clips/${jobId}.json`);
+  assert.equal(parseClipIdFromRecordKey(clipRecordKey(userId, jobId)), jobId);
+  assert.equal(parseFileIdFromUploadKey(uploadObjectKey(userId, jobId, ".mov")), jobId);
+  assert.equal(parseFileIdFromUploadKey(`uploads/${jobId}.mp4`), jobId);
 });
 
 test("object keys reject traversal and non-uuids", () => {

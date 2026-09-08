@@ -66,6 +66,41 @@ export function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
+export function formatDate(ts: number): string {
+  if (!Number.isFinite(ts) || ts <= 0) {
+    return "—";
+  }
+  return new Date(ts).toLocaleString("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+export function formatCodec(codec: string | null | undefined): string {
+  if (!codec) {
+    return "—";
+  }
+  const known: Record<string, string> = {
+    h264: "H.264",
+    avc1: "H.264",
+    hevc: "H.265",
+    h265: "H.265",
+    av1: "AV1",
+    vp9: "VP9",
+    vp8: "VP8",
+    aac: "AAC",
+    opus: "Opus",
+    mp3: "MP3",
+    ac3: "AC-3",
+    eac3: "E-AC-3",
+    pcm_s16le: "PCM",
+  };
+  return known[codec.toLowerCase()] ?? codec;
+}
+
 export function formatEta(seconds: number | null): string {
   if (seconds === null || !Number.isFinite(seconds) || seconds < 0) {
     return "—";

@@ -1,9 +1,9 @@
-import path from "node:path";
 import { NextResponse } from "next/server";
 import { requireOwnedJob } from "@/lib/authz";
 import { jobThumbKey } from "@/lib/keys";
 import { presignGetUrl, r2Enabled } from "@/lib/r2";
 import { SAMPLE_PUBLIC_PATH, SAMPLE_SOURCE_PATH } from "@/lib/sample";
+import { versionFileName } from "@/lib/settings";
 import { localPathFor } from "@/lib/storage";
 import { streamLocalFile } from "@/lib/stream-file";
 
@@ -85,14 +85,14 @@ async function mediaResponse(
   if (kind === "output") {
     if (job.outputObjectKey && r2Enabled()) {
       const signed = await presignGetUrl(job.outputObjectKey, {
-        downloadName: wantsDownload ? enhanceName(job.name) : undefined,
+        downloadName: wantsDownload ? versionFileName(job.name, job.settings) : undefined,
       });
       return NextResponse.redirect(signed, 302);
     }
     if (job.outputPath === SAMPLE_SOURCE_PATH || job.outputPath === job.sourcePath) {
       if (job.sourceObjectKey && r2Enabled()) {
         const signed = await presignGetUrl(job.sourceObjectKey, {
-          downloadName: wantsDownload ? enhanceName(job.name) : undefined,
+          downloadName: wantsDownload ? versionFileName(job.name, job.settings) : undefined,
         });
         return NextResponse.redirect(signed, 302);
       }
@@ -105,7 +105,7 @@ async function mediaResponse(
     }
     try {
       return await streamLocalFile(localPathFor(job.outputPath), request, {
-        downloadName: enhanceName(job.name),
+        downloadName: versionFileName(job.name, job.settings),
       });
     } catch {
       return new Response("Not found", { status: 404 });
@@ -113,10 +113,4 @@ async function mediaResponse(
   }
 
   return new Response("Not found", { status: 404 });
-}
-
-function enhanceName(name: string): string {
-  const ext = path.extname(name) || ".mp4";
-  const base = path.basename(name, ext);
-  return `${base}-enhanced.mp4`;
 }

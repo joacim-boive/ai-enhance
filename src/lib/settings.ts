@@ -310,6 +310,60 @@ export function engineLabel(engine: "gpu" | "cpu" | null): string {
   return "Engine pending";
 }
 
+export function treatmentLabel(settings: JobSettings | null | undefined): string {
+  if (!settings) {
+    return "Original";
+  }
+  if (settings.preset !== "custom") {
+    const preset = PRESETS.find((item) => item.id === settings.preset);
+    if (preset) {
+      return preset.label;
+    }
+  }
+  const bits: string[] = [];
+  if (settings.scale !== "none") {
+    bits.push(SCALE_OPTIONS.find((item) => item.id === settings.scale)?.label ?? settings.scale);
+  }
+  if (settings.fps !== "keep") {
+    bits.push(`${settings.fps} fps`);
+  }
+  if (settings.denoise) {
+    bits.push("Denoise");
+  }
+  if (settings.sharpen) {
+    bits.push("Sharpen");
+  }
+  return bits.length > 0 ? bits.join(" · ") : "Custom";
+}
+
+export function treatmentSlug(settings: JobSettings | null | undefined): string {
+  if (!settings) {
+    return "original";
+  }
+  const parts: string[] = [];
+  if (settings.scale !== "none") {
+    parts.push(settings.scale);
+  }
+  if (settings.fps !== "keep") {
+    parts.push(`${settings.fps}fps`);
+  }
+  if (settings.denoise) {
+    parts.push("denoise");
+  }
+  if (settings.sharpen) {
+    parts.push("sharpen");
+  }
+  return parts.join("-") || settings.preset;
+}
+
+export function versionFileName(originalName: string, settings: JobSettings | null | undefined): string {
+  const dot = originalName.lastIndexOf(".");
+  const ext = dot >= 0 ? originalName.slice(dot) : ".mp4";
+  const base = dot >= 0 ? originalName.slice(0, dot) : originalName;
+  const slug = treatmentSlug(settings);
+  return `${base}-${slug}${ext || ".mp4"}`;
+}
+
 export const ACCEPTED_VIDEO_TYPES = [
   "video/mp4",
   "video/quicktime",

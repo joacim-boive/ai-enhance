@@ -3,11 +3,12 @@ import {
   jobPointerKey,
   jobPrefix,
   jobRecordKey,
+  jobObjectsPrefix,
   parseJobIdFromRecordKey,
 } from "./keys";
 import { r2Enabled } from "./env";
-import { getJsonObject, listObjectKeys, putJsonObject } from "./r2";
-import { listPathnames, readJson, saveJson } from "./storage";
+import { deleteObject, deletePrefix, getJsonObject, listObjectKeys, putJsonObject } from "./r2";
+import { deleteLocalPathname, listPathnames, readJson, saveJson } from "./storage";
 import type { Job, JobEvent, JobEventLevel, PublicJob } from "./types";
 
 const emitter = new EventEmitter();
@@ -15,6 +16,14 @@ emitter.setMaxListeners(100);
 
 const cache = new Map<string, Job>();
 const abortControllers = new Map<string, AbortController>();
+
+function normalizeJob(job: Job): Job {
+  return {
+    ...job,
+    sourceClipId: job.sourceClipId ?? null,
+    outputClipId: job.outputClipId ?? null,
+  };
+}
 
 export function toPublicJob(job: Job): PublicJob {
   const {
@@ -59,15 +68,17 @@ export async function loadJob(id: string): Promise<Job | null> {
     }
     const stored = await getJsonObject<Job>(jobRecordKey(pointer.userId, id));
     if (stored) {
-      cache.set(id, stored);
-      return stored;
+      const job = normalizeJob(stored);
+      cache.set(id, job);
+      return job;
     }
     return null;
   }
   const stored = await readJson<Job>(`jobs/${id}.json`);
   if (stored) {
-    cache.set(id, stored);
-    return stored;
+    const job = normalizeJob(stored);
+    cache.set(id, job);
+    return job;
   }
   return null;
 }
@@ -83,8 +94,9 @@ export async function listJobs(userId: string): Promise<Job[]> {
       }
       const job = await getJsonObject<Job>(key);
       if (job && job.userId === userId) {
-        cache.set(job.id, job);
-        jobs.push(job);
+        const normalized = normalizeJob(job);
+        cache.set(normalized.id, normalized);
+        jobs.push(normalized);
       }
     }
   } else {
@@ -194,8 +206,26 @@ export function requestCancel(id: string): boolean {
   return true;
 }
 
-export async function removeJob(id: string): Promise<void> {
+export async function deleteJob(id: string): Promise<boolean> {
+  const job = await loadJob(id);
   cache.delete(id);
+  abortControllers.delete(id);
+  if (!job) {
+    return false;
+  }
+  if (r2Enabled()) {
+    await deletePrefix(jobObjectsPrefix(job.userId, job.id));
+    await deleteObject(jobPointerKey(job.id)).catch(() => undefined);
+  } else {
+    await deleteLocalPathname(`jobs/${job.id}.json`);
+    await deleteLocalPathname(`outputs/${job.id}.mp4`);
+    await deleteLocalPathname(`thumbs/${job.id}`);
+  }
+  return true;
+}
+
+export async function removeJob(id: string): Promise<void> {
+  await deleteJob(id);
 }
 
 export function levelForStatus(status: Job["status"]): JobEventLevel {

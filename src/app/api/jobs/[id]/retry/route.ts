@@ -28,6 +28,7 @@ export async function POST(
     fallbackReason: null,
     engine: null,
     runpodJobId: null,
+    outputClipId: null,
     outputPath: null,
     outputUrl: null,
     outputObjectKey: null,

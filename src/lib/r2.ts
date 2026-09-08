@@ -6,6 +6,8 @@ import {
   AbortMultipartUploadCommand,
   CompleteMultipartUploadCommand,
   CreateMultipartUploadCommand,
+  DeleteObjectCommand,
+  DeleteObjectsCommand,
   GetObjectCommand,
   HeadObjectCommand,
   ListObjectsV2Command,
@@ -272,6 +274,36 @@ export async function getJsonObject<T>(objectKey: string): Promise<T | null> {
     return JSON.parse(text) as T;
   } catch {
     return null;
+  }
+}
+
+export async function deleteObject(objectKey: string): Promise<void> {
+  const { client, bucket } = requireR2();
+  await client.send(
+    new DeleteObjectCommand({
+      Bucket: bucket,
+      Key: objectKey,
+    }),
+  );
+}
+
+export async function deletePrefix(prefix: string): Promise<void> {
+  const keys = await listObjectKeys(prefix);
+  if (keys.length === 0) {
+    return;
+  }
+  const { client, bucket } = requireR2();
+  for (let index = 0; index < keys.length; index += 1000) {
+    const chunk = keys.slice(index, index + 1000);
+    await client.send(
+      new DeleteObjectsCommand({
+        Bucket: bucket,
+        Delete: {
+          Objects: chunk.map((Key) => ({ Key })),
+          Quiet: true,
+        },
+      }),
+    );
   }
 }
 

@@ -7,6 +7,9 @@ import {
   resolveOutputTarget,
   scaleExceeds8k,
   settingsFromPreset,
+  treatmentLabel,
+  treatmentSlug,
+  versionFileName,
   withCustomOverride,
 } from "./settings";
 import type { VideoMeta } from "./types";
@@ -120,4 +123,14 @@ test("cinema 4K does not warn", () => {
   const target = resolveOutputTarget(meta, settingsFromPreset("cinema"));
   assert.equal(target.exceedsUhd, false);
   assert.equal(outputSizeNotice(target), null);
+});
+
+test("treatment labels describe presets and custom fps runs", () => {
+  assert.equal(treatmentLabel(null), "Original");
+  assert.equal(treatmentLabel(settingsFromPreset("hfr")), "High Frame Rate");
+  assert.equal(treatmentLabel(settingsFromPreset("cinema")), "Cinema 4K");
+  const custom = withCustomOverride(settingsFromPreset("restore"), { fps: "120", scale: "none" });
+  assert.equal(treatmentLabel(custom), "120 fps · Denoise");
+  assert.equal(treatmentSlug(custom), "120fps-denoise");
+  assert.equal(versionFileName("sunset.mov", custom), "sunset-120fps-denoise.mov");
 });
