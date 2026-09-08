@@ -630,7 +630,7 @@ function workerErrorText(text: string): string {
 export function gpuFailureMessage(text: string, status?: string): string {
   const extracted = workerErrorText(text);
   if (isGpuContainerRamOom(extracted)) {
-    return "GPU worker ran out of RAM interpolating this clip. 24→60 stays on RIFE 2× then ffmpeg to 60 so the container does not 5× the whole clip in memory. Retry the job.";
+    return "GPU worker ran out of RAM interpolating this clip. Retry the job — 24→60 runs RIFE in overlapping chunks so the whole clip is not 5× in memory at once.";
   }
   if (isGpuOom(extracted)) {
     return "GPU ran out of VRAM during SeedVR2 encoding (Allocation on device). 4K clips stay at 4K on the RTX 4090; retry at source size or a lower scale.";

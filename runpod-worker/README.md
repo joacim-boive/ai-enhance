@@ -10,7 +10,7 @@ This wrap:
 2. Caps short side at 2160, tiles the VAE (256–512), drops batch size, and swaps DiT blocks so 4K sources enhance in place instead of trying 8K.
 3. Honors `job.input.resolution` from the app (HFR / source-size jobs no longer get an unwanted 2×).
 4. When `scale_changed` is false (fps-only), strips SeedVR2 from the Hub graph so RIFE interpolates the source frames instead of running a 1× “upscale”.
-5. Sets RIFE’s integer multiplier so the **requested** fps is reachable without blowing the serverless RAM cgroup. 24→60 prefers 5× (exact 60 fps timestamps) only when the clip’s frame tensor fits ~6 GB; phone-length 1080p stays on RIFE 2× (48 fps) and ffmpeg motion-interpolates to 60. 5× on a 10s 9:16 clip was ~30 GB and tripped `triggered memory limits (OOM)`. 30→60 stays a single 2× pass. Rotation is baked in the same ffmpeg pass so 9:16 is not left as coded 16:9.
+5. Sets RIFE’s integer multiplier so the **requested** fps is reachable. 24→60 is always RIFE 5× (exact 60 fps timestamps), then `VHS_SelectEveryNthImage` keeps every 2nd frame so the encode is 60 fps — not ffmpeg motion-interpolation from 48. Phone-length 1080p would be ~30 GB as one 5× tensor, so the wrap splits the source into overlapping chunks (1 source-frame overlap, drop the first output frame of chunk 2+). 30→60 stays a single 2× pass. Display rotation is baked on the **source** before RIFE so motion is upright.
 6. Waits for ComfyUI over HTTP history if the Hub websocket drops, so interpolation jobs are not marked GPU-unavailable.
 7. Streams the mp4 to the **presigned** `upload_url` the app minted for `users/{userId}/jobs/{jobId}/output.mp4`.
 8. Returns `{ object_key, byte_size, etag }` only. No bytes go back through RunPod or Next.js.

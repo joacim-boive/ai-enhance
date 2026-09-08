@@ -6,9 +6,11 @@ import glob
 import http.client
 import json
 import os
+import shutil
 import subprocess
 import tempfile
-from typing import Any
+import urllib.request
+from typing import Any, NamedTuple
 from urllib.parse import urlparse
 import base64
 
@@ -263,6 +265,320 @@ def conform_output_rotation(path: str, job_input: dict[str, Any] | None) -> str:
 def conform_output_fps(path: str, job_input: dict[str, Any] | None) -> str:
     """Decimate a denser RIFE encode (e.g. 120 fps) down to the requested rate (60)."""
     return conform_output(path, job_input)
+
+
+class PreparedRifeSource(NamedTuple):
+    work_dir: str
+    source_path: str
+    chunk_paths: list[str]
+    work_input: dict[str, Any]
+
+
+def prepare_rife_source(job_input: dict[str, Any] | None) -> PreparedRifeSource | None:
+    """Download the clip, bake display rotation, split overlapping RIFE chunks."""
+    from vram import (
+        job_rife_plan,
+        needs_rife_chunking,
+        rife_chunk_ranges,
+        rife_chunk_source_frames,
+        rife_working_dimensions,
+        wants_rife_preprocess,
+    )
+
+    if not job_input or not wants_rife_preprocess(job_input):
+        return None
+
+    work_dir = tempfile.mkdtemp(prefix="lumen-rife-")
+    try:
+        source = _local_job_video(job_input, os.path.join(work_dir, "source.mp4"))
+        rotation = normalize_rotation(job_input.get("rotation"))
+        vf_rot = transpose_filter(rotation)
+        if vf_rot:
+            baked = os.path.join(work_dir, "source-upright.mp4")
+            _ffmpeg_filters(source, baked, vf_rot)
+            print(f"Lumen wrap: baked source rotation {rotation} deg before RIFE", flush=True)
+            source = baked
+            rotation = 0
+
+        probe = probe_video(source)
+        work_input = dict(job_input)
+        work_input["rotation"] = rotation
+        work_input.pop("video_url", None)
+        work_input.pop("video_base64", None)
+        if probe.get("width"):
+            work_input["width"] = probe["width"]
+        if probe.get("height"):
+            work_input["height"] = probe["height"]
+        if probe.get("fps"):
+            work_input["source_fps"] = probe["fps"]
+        if probe.get("duration"):
+            try:
+                work_input["duration"] = float(probe["duration"])
+            except (TypeError, ValueError):
+                pass
+
+        frames = count_video_frames(source)
+        plan = job_rife_plan(work_input)
+        dims = rife_working_dimensions(work_input)
+        if plan is None:
+            chunk_len = frames
+        elif dims is None:
+            chunk_len = 16
+        else:
+            chunk_len = rife_chunk_source_frames(dims[0], dims[1], plan.multiplier)
+        ranges = rife_chunk_ranges(frames, chunk_len)
+        if not ranges:
+            ranges = [(0, max(frames, 1))]
+        if not needs_rife_chunking(work_input, frames):
+            ranges = [(0, frames)]
+
+        print(
+            f"Lumen wrap: RIFE source {frames} frames in {len(ranges)} chunk(s) "
+            f"(~{chunk_len} source frames each)",
+            flush=True,
+        )
+        chunk_paths: list[str] = []
+        if len(ranges) == 1 and ranges[0] == (0, frames):
+            chunk_paths.append(source)
+        else:
+            for index, (start, end) in enumerate(ranges):
+                dest = os.path.join(work_dir, f"chunk_{index:03d}.mp4")
+                extract_frame_range(source, dest, start, end)
+                chunk_paths.append(dest)
+        return PreparedRifeSource(work_dir, source, chunk_paths, work_input)
+    except Exception:
+        shutil.rmtree(work_dir, ignore_errors=True)
+        raise
+
+
+def stitch_rife_chunk_outputs(
+    paths: list[str],
+    prepared: PreparedRifeSource,
+) -> str:
+    """Drop the overlap frame on chunks 2+, concat, restore original audio."""
+    if not paths:
+        raise RuntimeError("RIFE produced no chunk videos to stitch.")
+    work_dir = prepared.work_dir
+    trimmed: list[str] = []
+    for index, path in enumerate(paths):
+        if index == 0:
+            trimmed.append(path)
+            continue
+        dest = os.path.join(work_dir, f"trim_{index:03d}.mp4")
+        drop_leading_frames(path, dest, 1)
+        trimmed.append(dest)
+    concated = os.path.join(work_dir, "rife-concat.mp4")
+    concat_video_files(trimmed, concated)
+    muxed = os.path.join(work_dir, "rife-stitched.mp4")
+    mux_original_audio(concated, prepared.source_path, muxed)
+    return muxed
+
+
+def count_video_frames(path: str) -> int:
+    probe = probe_video(path)
+    raw = probe.get("frames")
+    if raw not in (None, "", "N/A"):
+        try:
+            counted = int(str(raw))
+            if counted > 0:
+                return counted
+        except (TypeError, ValueError):
+            pass
+    fps = probe.get("fps")
+    duration = probe.get("duration")
+    if isinstance(fps, (int, float)) and duration not in (None, ""):
+        try:
+            counted = int(round(float(fps) * float(duration)))
+            if counted > 0:
+                return counted
+        except (TypeError, ValueError):
+            pass
+    try:
+        raw = subprocess.check_output(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-count_frames",
+                "-select_streams",
+                "v:0",
+                "-show_entries",
+                "stream=nb_read_frames",
+                "-of",
+                "default=nokey=1:noprint_wrappers=1",
+                path,
+            ],
+            text=True,
+            timeout=120,
+        )
+        counted = int(str(raw).strip().splitlines()[0])
+        if counted > 0:
+            return counted
+    except Exception:
+        pass
+    raise RuntimeError(f"Could not count frames in {path}")
+
+
+def extract_frame_range(src: str, dest: str, start: int, end: int) -> None:
+    if end <= start:
+        raise ValueError(f"empty frame range [{start}, {end})")
+    fps = probe_video(src).get("fps")
+    _ffmpeg_select(
+        src,
+        dest,
+        f"select='gte(n,{int(start)})*lt(n,{int(end)})',setpts=PTS-STARTPTS",
+        fps if isinstance(fps, (int, float)) else None,
+    )
+
+
+def drop_leading_frames(src: str, dest: str, count: int = 1) -> None:
+    skipped = max(1, int(count))
+    fps = probe_video(src).get("fps")
+    _ffmpeg_select(
+        src,
+        dest,
+        f"select='gte(n,{skipped})',setpts=PTS-STARTPTS",
+        fps if isinstance(fps, (int, float)) else None,
+    )
+
+
+def concat_video_files(paths: list[str], dest: str) -> None:
+    if len(paths) == 1:
+        shutil.copy2(paths[0], dest)
+        return
+    list_path = f"{dest}.txt"
+    with open(list_path, "w", encoding="utf-8") as handle:
+        for path in paths:
+            escaped = path.replace("'", "'\\''")
+            handle.write(f"file '{escaped}'\n")
+    try:
+        subprocess.check_call(
+            [
+                "ffmpeg",
+                "-y",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-f",
+                "concat",
+                "-safe",
+                "0",
+                "-i",
+                list_path,
+                "-c",
+                "copy",
+                dest,
+            ],
+            timeout=3600,
+        )
+        return
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        pass
+    fps = probe_video(paths[0]).get("fps")
+    command = [
+        "ffmpeg",
+        "-y",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-f",
+        "concat",
+        "-safe",
+        "0",
+        "-i",
+        list_path,
+        "-c:v",
+        "libx264",
+        "-preset",
+        "fast",
+        "-crf",
+        "16",
+        "-pix_fmt",
+        "yuv420p",
+        "-an",
+    ]
+    if isinstance(fps, (int, float)) and fps > 0:
+        command.extend(["-r", fps_filter_value(float(fps))])
+    command.append(dest)
+    subprocess.check_call(command, timeout=3600)
+
+
+def mux_original_audio(video_path: str, source_path: str, dest: str) -> None:
+    duration = probe_video(video_path).get("duration")
+    command = [
+        "ffmpeg",
+        "-y",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-i",
+        video_path,
+        "-i",
+        source_path,
+        "-map",
+        "0:v:0",
+        "-map",
+        "1:a:0?",
+        "-c:v",
+        "copy",
+        "-movflags",
+        "+faststart",
+    ]
+    if duration not in (None, ""):
+        command.extend(["-t", str(duration)])
+    try:
+        subprocess.check_call(command + ["-c:a", "aac", "-b:a", "192k", dest], timeout=3600)
+        return
+    except subprocess.CalledProcessError:
+        shutil.copy2(video_path, dest)
+
+
+def _local_job_video(job_input: dict[str, Any], dest: str) -> str:
+    path = job_input.get("video_path")
+    if isinstance(path, str) and os.path.isfile(path):
+        if os.path.abspath(path) != os.path.abspath(dest):
+            shutil.copy2(path, dest)
+            return dest
+        return path
+    url = job_input.get("video_url")
+    if isinstance(url, str) and url:
+        urllib.request.urlretrieve(url, dest)
+        return dest
+    payload = job_input.get("video_base64")
+    if isinstance(payload, str) and len(payload) > 32:
+        raw = payload.split("base64,", 1)[1] if "base64," in payload else payload
+        with open(dest, "wb") as handle:
+            handle.write(base64.b64decode(raw))
+        return dest
+    raise RuntimeError("Interpolation job has no video_url or video_path.")
+
+
+def _ffmpeg_select(src: str, dest: str, vf: str, fps: float | None) -> None:
+    command = [
+        "ffmpeg",
+        "-y",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-noautorotate",
+        "-i",
+        src,
+        "-vf",
+        vf,
+        "-an",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "fast",
+        "-crf",
+        "12",
+        "-pix_fmt",
+        "yuv420p",
+    ]
+    if isinstance(fps, (int, float)) and fps > 0:
+        command.extend(["-r", fps_filter_value(float(fps))])
+    command.append(dest)
+    subprocess.check_call(command, timeout=3600)
 
 
 def _conformed_path(path: str, fps: float | None, rotation: int) -> str:
