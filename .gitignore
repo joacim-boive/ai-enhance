@@ -49,6 +49,20 @@ uploads/
 AGENTS.md
 CLAUDE.md
 
+# graphify
+graphify-out/
+.graphify_python
+.graphify_root
+.graphify_analysis.json
+.graphify_labels.json
+.graphify_uncached.txt
+.graphify_cached.json
+.graphify_chunk_*.json
+.graphify_semantic*.json
+.graphify_ast.json
+.graphify_detect.json
+.graphify_extract.json
+
 __pycache__/
 *.py[cod]
 
