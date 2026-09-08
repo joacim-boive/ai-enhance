@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import glob
 import http.client
+import json
 import os
+import subprocess
 import tempfile
 from typing import Any
 from urllib.parse import urlparse
+import base64
 
 PUT_LIMIT = 5 * 1024 * 1024 * 1024 - 16 * 1024 * 1024
+INLINE_LIMIT = 12 * 1024 * 1024
 SEARCH_DIRS = (
     "/ComfyUI/output",
     "/workspace/ComfyUI/output",
@@ -22,9 +26,7 @@ def upload_master(job_input: dict[str, Any], output: Any) -> dict[str, Any]:
     object_key = job_input.get("object_key")
     upload_url = job_input.get("upload_url")
     if not isinstance(object_key, str) or not isinstance(upload_url, str):
-        if isinstance(output, dict):
-            return output
-        return {"output": output}
+        return attach_local_output(output)
 
     path = _find_video_path(output)
     if path is None:
@@ -35,21 +37,108 @@ def upload_master(job_input: dict[str, Any], output: Any) -> dict[str, Any]:
         raise RuntimeError("GPU finished but no mp4 was found to upload.")
 
     size = os.path.getsize(path)
+    probe = probe_video(path)
     content_type = str(job_input.get("content_type") or "video/mp4")
     multipart = job_input.get("multipart") if isinstance(job_input.get("multipart"), dict) else {}
 
     if size <= PUT_LIMIT or not multipart.get("partUrls"):
         etag = stream_put(upload_url, path, content_type)
-        return {"object_key": object_key, "byte_size": size, "etag": etag}
+        result: dict[str, Any] = {"object_key": object_key, "byte_size": size, "etag": etag}
+        if probe:
+            result["probe"] = probe
+        return result
 
     parts = stream_multipart(path, multipart)
-    return {
+    result = {
         "object_key": object_key,
         "byte_size": size,
         "etag": None,
         "upload_id": multipart.get("uploadId"),
         "parts": parts,
     }
+    if probe:
+        result["probe"] = probe
+    return result
+
+
+def probe_video(path: str) -> dict[str, Any]:
+    try:
+        raw = subprocess.check_output(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-select_streams",
+                "v:0",
+                "-show_entries",
+                "stream=width,height,r_frame_rate,nb_frames",
+                "-show_entries",
+                "format=duration,size",
+                "-of",
+                "json",
+                path,
+            ],
+            text=True,
+            timeout=30,
+        )
+        data = json.loads(raw)
+        stream = (data.get("streams") or [{}])[0]
+        fmt = data.get("format") or {}
+        rate = stream.get("r_frame_rate") if isinstance(stream, dict) else None
+        fps = _fps_from_rate(rate if isinstance(rate, str) else None)
+        info: dict[str, Any] = {
+            "width": stream.get("width") if isinstance(stream, dict) else None,
+            "height": stream.get("height") if isinstance(stream, dict) else None,
+            "fps": fps,
+            "frame_rate": rate,
+            "frames": stream.get("nb_frames") if isinstance(stream, dict) else None,
+            "duration": fmt.get("duration") if isinstance(fmt, dict) else None,
+            "size": fmt.get("size") if isinstance(fmt, dict) else None,
+        }
+        cleaned = {key: value for key, value in info.items() if value not in (None, "")}
+        print(f"Lumen wrap: output probe {cleaned}", flush=True)
+        return cleaned
+    except Exception as error:
+        print(f"Lumen wrap: ffprobe failed: {error}", flush=True)
+        return {}
+
+
+def attach_local_output(output: Any) -> dict[str, Any]:
+    """Hub often returns only a worker-local path. Inline small files so we can inspect fps."""
+    result = dict(output) if isinstance(output, dict) else {"output": output}
+    path = _find_video_path(result)
+    if path is None:
+        path = _newest_mp4()
+    if path is None or not os.path.isfile(path):
+        return result
+    probe = probe_video(path)
+    if probe:
+        result["probe"] = probe
+    size = os.path.getsize(path)
+    if size <= INLINE_LIMIT and not _has_inline_video(result):
+        with open(path, "rb") as handle:
+            result["video_base64"] = base64.b64encode(handle.read()).decode("ascii")
+        result.setdefault("video_path", path)
+        print(f"Lumen wrap: attached inline video ({size} bytes)", flush=True)
+    return result
+
+
+def _fps_from_rate(rate: str | None) -> float | None:
+    if not rate or "/" not in rate:
+        return None
+    num, den = rate.split("/", 1)
+    try:
+        denom = float(den)
+        if denom == 0:
+            return None
+        return float(num) / denom
+    except ValueError:
+        return None
+
+
+def _has_inline_video(output: dict[str, Any]) -> bool:
+    video = output.get("video") or output.get("video_base64") or output.get("data")
+    return isinstance(video, str) and len(video) > 32
 
 
 def stream_put(url: str, path: str, content_type: str) -> str | None:

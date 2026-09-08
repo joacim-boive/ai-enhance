@@ -56,9 +56,9 @@ The GPU worker **never** receives R2 secrets. On submit the app mints a presigne
 
 Fluid Compute is on (`vercel.json`) so job processing can continue after the HTTP response via `after()`. Functions stay in **Europe** (`fra1`).
 
-CPU fallback on Vercel uses bundled `ffmpeg-static` / `ffprobe-static`. Keep that path for short clips; multi-GB interpolations belong on the wrapped GPU worker.
+CPU on Vercel uses bundled `ffmpeg-static` / `ffprobe-static` when you pick that engine. Multi-GB interpolations belong on the wrapped GPU worker.
 
-Until `runpod-worker/` is built and pointed at the endpoint, GPU jobs fail closed and fall back to CPU.
+Until `runpod-worker/` is built and pointed at the endpoint, GPU jobs fail closed. Retry on the 4090 — there is no CPU interpolator fallback.
 
 ## Run locally
 

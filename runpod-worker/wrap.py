@@ -9,9 +9,11 @@ Deploy this file as /handler.py after copying the original Hub handler to
 
 from __future__ import annotations
 
+import json
 import os
 import runpy
 import sys
+import time
 from contextvars import ContextVar
 from typing import Any
 
@@ -53,6 +55,88 @@ def _wrap_calculate_resolution(_original):
     return calculate_resolution
 
 
+def _gif_path_from_history(entry: dict[str, Any]) -> str | None:
+    outputs = entry.get("outputs")
+    if not isinstance(outputs, dict):
+        return None
+    for node_output in outputs.values():
+        if not isinstance(node_output, dict):
+            continue
+        gifs = node_output.get("gifs")
+        if not isinstance(gifs, list):
+            continue
+        for video in gifs:
+            if isinstance(video, dict) and isinstance(video.get("fullpath"), str):
+                return video["fullpath"]
+    return None
+
+
+def _history_error(entry: dict[str, Any]) -> str | None:
+    status = entry.get("status")
+    if isinstance(status, dict) and status.get("status_str") == "error":
+        messages = status.get("messages")
+        return str(messages) if messages else "ComfyUI execution error"
+    return None
+
+
+def _wrap_get_video_path(original):
+    def get_video_path(ws, prompt):
+        main = sys.modules.get("__main__")
+        if main is None or not hasattr(main, "queue_prompt") or not hasattr(main, "get_history"):
+            return original(ws, prompt)
+
+        queued = main.queue_prompt(prompt)
+        prompt_id = queued["prompt_id"]
+        deadline = time.time() + 3600
+        socket = ws
+        while time.time() < deadline:
+            if socket is not None:
+                try:
+                    socket.settimeout(5.0)
+                    out = socket.recv()
+                    if isinstance(out, str):
+                        message = json.loads(out)
+                        if message.get("type") == "execution_error":
+                            data = message.get("data") if isinstance(message.get("data"), dict) else {}
+                            raise RuntimeError(
+                                str(data.get("exception_message") or data.get("exception_type") or "ComfyUI execution error"),
+                            )
+                        if message.get("type") == "executing":
+                            data = message.get("data") if isinstance(message.get("data"), dict) else {}
+                            if data.get("node") is None and data.get("prompt_id") == prompt_id:
+                                break
+                except RuntimeError:
+                    raise
+                except Exception:
+                    print("Lumen wrap: ComfyUI websocket dropped; waiting on HTTP history", flush=True)
+                    socket = None
+            try:
+                history = main.get_history(prompt_id)
+                entry = history.get(prompt_id) if isinstance(history, dict) else None
+                if isinstance(entry, dict):
+                    err = _history_error(entry)
+                    if err:
+                        raise RuntimeError(err)
+                    path = _gif_path_from_history(entry)
+                    if path:
+                        return path
+            except RuntimeError:
+                raise
+            except Exception:
+                pass
+            time.sleep(1)
+
+        history = main.get_history(prompt_id)
+        entry = history.get(prompt_id) if isinstance(history, dict) else None
+        if isinstance(entry, dict):
+            path = _gif_path_from_history(entry)
+            if path:
+                return path
+        raise RuntimeError("ComfyUI finished without a video file.")
+
+    return get_video_path
+
+
 def _install_hub_patches() -> None:
     main = sys.modules.get("__main__")
     if main is None:
@@ -63,6 +147,9 @@ def _install_hub_patches() -> None:
     if hasattr(main, "calculate_resolution") and not getattr(main, "_lumen_res_patched", False):
         main.calculate_resolution = _wrap_calculate_resolution(main.calculate_resolution)
         main._lumen_res_patched = True
+    if hasattr(main, "get_video_path") and not getattr(main, "_lumen_wait_patched", False):
+        main.get_video_path = _wrap_get_video_path(main.get_video_path)
+        main._lumen_wait_patched = True
 
 
 def _patched_start(config):

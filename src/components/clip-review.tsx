@@ -116,7 +116,7 @@ export function ClipReview({
             <p className="mt-4 font-mono text-[11px] uppercase tracking-[0.14em] text-[var(--muted)]">
               {formatResolution(meta.width, meta.height)} · {formatFps(meta.fps)} ·{" "}
               {formatDuration(meta.durationSec)} · {formatBytes(meta.sizeBytes)}
-              {selected.engine ? ` · ${engineLabel(selected.engine)}` : ""}
+              {selected.engine ? ` · ${engineLabel(selected.engine, selected.settings)}` : ""}
             </p>
           ) : null}
         </div>

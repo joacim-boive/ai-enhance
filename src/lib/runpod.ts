@@ -175,6 +175,8 @@ export async function submitGpuJob(input: {
   multipart: GpuMultipartGrant;
   scaleChanged: boolean;
   fpsChanged: boolean;
+  fps?: number;
+  sourceFps?: number;
   resolution: number;
 }): Promise<string> {
   const { apiKey, endpointId } = runpodConfig();
@@ -192,6 +194,8 @@ export async function submitGpuJob(input: {
     scale_changed: input.scaleChanged,
     fps_changed: input.fpsChanged,
     skip_upscale: gpuSkipUpscale(input.scaleChanged, input.fpsChanged),
+    fps: input.fps,
+    source_fps: input.sourceFps,
     multipart: {
       uploadId: input.multipart.uploadId,
       partSize: input.multipart.partSize,
@@ -268,9 +272,7 @@ export async function pollGpuJob(
             workers,
           })
         ) {
-          throw new Error(
-            "GPU worker stayed queued while pulling the image. Falling back to CPU.",
-          );
+          throw new Error(GPU_QUEUE_STUCK_MESSAGE);
         }
       }
     }
@@ -369,13 +371,40 @@ export function isGpuOom(text: string): boolean {
   );
 }
 
-export function gpuFailureMessage(text: string, status?: string): string {
-  if (isGpuOom(text)) {
-    return "GPU ran out of VRAM during SeedVR2 encoding (Allocation on device). 4K clips stay at 4K on the RTX 4090; try CPU if this keeps happening.";
-  }
+export function isGpuWebsocketDrop(text: string): boolean {
+  return /websocketconnectionclosed|connection to remote host was lost|websocket.*closed/i.test(
+    text,
+  );
+}
+
+function workerErrorText(text: string): string {
   const trimmed = text.trim();
-  if (trimmed.length > 0) {
-    return trimmed;
+  if (trimmed.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(trimmed) as { error_message?: unknown; error?: unknown };
+      if (typeof parsed.error_message === "string" && parsed.error_message.length > 0) {
+        return parsed.error_message;
+      }
+      if (typeof parsed.error === "string" && parsed.error.length > 0) {
+        return parsed.error;
+      }
+    } catch {
+      return trimmed;
+    }
+  }
+  return trimmed;
+}
+
+export function gpuFailureMessage(text: string, status?: string): string {
+  const extracted = workerErrorText(text);
+  if (isGpuOom(extracted)) {
+    return "GPU ran out of VRAM during SeedVR2 encoding (Allocation on device). 4K clips stay at 4K on the RTX 4090; retry at source size or a lower scale.";
+  }
+  if (isGpuWebsocketDrop(extracted)) {
+    return "GPU interpolation lost its ComfyUI connection. Retry the job — it stays on the RTX 4090 (CPU fallback is off).";
+  }
+  if (extracted.length > 0) {
+    return extracted;
   }
   return `GPU job ${(status ?? "failed").toLowerCase()}`;
 }
@@ -414,3 +443,5 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
 }
 
 export const GPU_QUEUE_TIMEOUT_MS = 6 * 60 * 1000;
+export const GPU_QUEUE_STUCK_MESSAGE =
+  "GPU worker stayed queued while pulling the image. Retry the job — it stays on the RTX 4090 (CPU fallback is off).";

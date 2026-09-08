@@ -29,6 +29,7 @@ import {
 import {
   cancelGpuJob,
   getGpuJobStatus,
+  gpuFailureMessage,
   gpuOutputLooksLikeBytes,
   gpuWarmupMessage,
   isGpuConfigured,
@@ -206,17 +207,8 @@ async function processJob(id: string): Promise<void> {
         return;
       }
       const reason = error instanceof Error ? error.message : "GPU failed";
-      fallbackReason = reason;
-      await appendEvent(id, {
-        stage: "Fallback",
-        message: reason.includes("VRAM")
-          ? `${reason} Switching to high-quality CPU interpolation.`
-          : `GPU unavailable (${reason}). Switching to high-quality CPU interpolation.`,
-        progress: job.progress,
-        level: "warn",
-      });
-      await runCpu(id, input, meta, job.settings, controller.signal, "high");
-      usedEngine = "cpu";
+      await failJob(id, gpuFailureMessage(reason));
+      return;
     }
   } else {
     if (job.settings.enginePreference === "gpu" && (!isGpuConfigured() || !r2Enabled())) {
@@ -372,6 +364,8 @@ async function dispatchGpu(job: Job, target: OutputTarget): Promise<string> {
     multipart: grant.multipart,
     scaleChanged: target.scaleChanged,
     fpsChanged: target.fpsChanged,
+    fps: target.fps,
+    sourceFps: meta.fps,
     resolution: hub.resolution,
   });
   await patchJob(job.id, { runpodJobId, status: "processing", stage: "Enhancing on GPU" });

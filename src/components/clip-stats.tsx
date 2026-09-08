@@ -55,7 +55,7 @@ function statsRows(
       label: "Frames",
       value: meta?.frameCount ? String(meta.frameCount) : "—",
     },
-    { label: "Engine", value: clip.kind === "original" ? "Source" : engineLabel(clip.engine) },
+    { label: "Engine", value: clip.kind === "original" ? "Source" : engineLabel(clip.engine, clip.settings) },
     { label: "File", value: clip.kind === "original" ? clip.name : versionFileName(clip.name, clip.settings) },
   ];
 }

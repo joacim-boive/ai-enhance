@@ -1,5 +1,6 @@
 import { even, evenFloor } from "./format";
 import type {
+  Engine,
   EnginePreference,
   FpsMode,
   JobSettings,
@@ -80,7 +81,7 @@ export const DEFAULT_SETTINGS: JobSettings = {
   fps: "keep",
   denoise: false,
   sharpen: false,
-  enginePreference: "auto",
+  enginePreference: "gpu",
 };
 
 export function settingsFromPreset(preset: QualityPreset): JobSettings {
@@ -94,7 +95,7 @@ export function settingsFromPreset(preset: QualityPreset): JobSettings {
     fps: definition.fps,
     denoise: definition.denoise,
     sharpen: definition.sharpen,
-    enginePreference: "auto",
+    enginePreference: "gpu",
   };
 }
 
@@ -300,14 +301,42 @@ export function preferGpuEngine(input: {
   return input.scaleChanged || input.fpsChanged;
 }
 
-export function engineLabel(engine: "gpu" | "cpu" | null): string {
+export function engineLabel(engine: Engine | null, settings?: JobSettings | null): string {
   if (engine === "gpu") {
-    return "GPU · SeedVR2 + RIFE 4.9";
+    return gpuEngineLabel(settings);
   }
   if (engine === "cpu") {
     return "CPU · Lanczos + motion interpolation";
   }
   return "Engine pending";
+}
+
+export function gpuEngineLabel(settings?: JobSettings | null): string {
+  const fpsOnly = Boolean(settings && settings.fps !== "keep" && settings.scale === "none");
+  const scaleOnly = Boolean(settings && settings.fps === "keep" && settings.scale !== "none");
+  if (fpsOnly) {
+    return "GPU · RIFE 4.9";
+  }
+  if (scaleOnly) {
+    return "GPU · SeedVR2";
+  }
+  return "GPU · SeedVR2 + RIFE 4.9";
+}
+
+export function enhanceEngineCopy(target: {
+  fpsChanged: boolean;
+  scaleChanged: boolean;
+}): string {
+  if (target.fpsChanged && !target.scaleChanged) {
+    return "Frame interpolation runs RIFE 4.9 on the RTX 4090. SeedVR2 is skipped.";
+  }
+  if (target.scaleChanged && !target.fpsChanged) {
+    return "Upscale runs SeedVR2 on the RTX 4090. Results above 4K show a warning; nothing above 8K is allowed.";
+  }
+  if (target.fpsChanged && target.scaleChanged) {
+    return "GPU uses SeedVR2 then RIFE 4.9 on an RTX 4090. Results above 4K show a warning; nothing above 8K is allowed.";
+  }
+  return "GPU uses SeedVR2 + RIFE 4.9 on an RTX 4090. Results above 4K show a warning; nothing above 8K is allowed.";
 }
 
 export function treatmentLabel(settings: JobSettings | null | undefined): string {

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  GPU_QUEUE_STUCK_MESSAGE,
   gpuFailureMessage,
   gpuOutputLooksLikeBytes,
   gpuShouldAlert,
@@ -9,6 +10,7 @@ import {
   gpuWarmupMessage,
   isGpuConfigured,
   isGpuOom,
+  isGpuWebsocketDrop,
   parseGpuObjectOutput,
   runpodConfig,
 } from "./runpod";
@@ -58,6 +60,22 @@ test("gpuFailureMessage rewrites SeedVR2 device allocation OOMs", () => {
     /VRAM/,
   );
   assert.equal(gpuFailureMessage("", "FAILED"), "GPU job failed");
+});
+
+test("queue timeout message does not mention CPU fallback", () => {
+  assert.match(GPU_QUEUE_STUCK_MESSAGE, /RTX 4090/);
+  assert.doesNotMatch(GPU_QUEUE_STUCK_MESSAGE, /Falling back to CPU/i);
+});
+
+test("gpuFailureMessage extracts websocket drops and does not mention CPU fallback", () => {
+  const raw = JSON.stringify({
+    error_type: "<class 'websocket._exceptions.WebSocketConnectionClosedException'>",
+    error_message: "Connection to remote host was lost.",
+  });
+  assert.equal(isGpuWebsocketDrop(raw), true);
+  const message = gpuFailureMessage(raw);
+  assert.match(message, /RTX 4090/);
+  assert.doesNotMatch(message, /CPU interpolation/i);
 });
 
 test("gpuShouldAlert stays quiet when the worker is merely cold or unset", () => {
