@@ -23,6 +23,8 @@ function job(patch: Partial<Job>): Job {
       sharpen: false,
       enginePreference: "auto",
     },
+    sourceClipId: null,
+    outputClipId: null,
     sourcePath: "users/x/uploads/y.mp4",
     sourceUrl: "/api/media/y/source",
     sourceObjectKey: "users/x/uploads/y.mp4",
