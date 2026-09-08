@@ -1,4 +1,5 @@
 import os
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -10,6 +11,7 @@ from r2_put import (
     fps_filter_value,
     job_target_fps,
     normalize_rotation,
+    output_needs_fps,
     output_needs_rotation,
     probe_video,
     transpose_filter,
@@ -92,6 +94,9 @@ class R2PutTests(unittest.TestCase):
         self.assertTrue(output_needs_rotation(3840, 2160, 90))
         self.assertFalse(output_needs_rotation(2160, 3840, 90))
         self.assertFalse(output_needs_rotation(3840, 2160, 0))
+        self.assertTrue(output_needs_fps(48, 60))
+        self.assertTrue(output_needs_fps(120, 60))
+        self.assertFalse(output_needs_fps(60, 60))
 
     def test_conform_output_rotation_transposes_landscape_master(self) -> None:
         src = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False).name
@@ -166,6 +171,169 @@ class R2PutTests(unittest.TestCase):
             for path in {src, out}:
                 if os.path.isfile(path):
                     os.unlink(path)
+
+    def test_conform_output_interpolates_48_to_60(self) -> None:
+        src = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False).name
+        out = src
+        try:
+            subprocess.check_call(
+                [
+                    "ffmpeg",
+                    "-y",
+                    "-hide_banner",
+                    "-loglevel",
+                    "error",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "color=c=green:s=16x16:r=48:d=1",
+                    "-c:v",
+                    "libx264",
+                    "-pix_fmt",
+                    "yuv420p",
+                    src,
+                ],
+                timeout=30,
+            )
+            out = conform_output_fps(src, {"fps": 60})
+            self.assertNotEqual(out, src)
+            probe = probe_video(out)
+            self.assertEqual(probe.get("fps"), 60.0)
+            duration = float(probe.get("duration") or 0)
+            self.assertGreater(duration, 0.8)
+            self.assertLess(duration, 1.3)
+        except FileNotFoundError:
+            self.skipTest("ffmpeg not available")
+        finally:
+            for path in {src, out}:
+                if os.path.isfile(path):
+                    os.unlink(path)
+
+    def test_overlap_extract_drop_concat_keeps_source_frame_count(self) -> None:
+        from r2_put import (
+            PreparedRifeSource,
+            concat_video_files,
+            count_video_frames,
+            drop_leading_frames,
+            extract_frame_range,
+            stitch_rife_chunk_outputs,
+        )
+
+        work = tempfile.mkdtemp(prefix="lumen-rife-test-")
+        src = os.path.join(work, "src.mp4")
+        try:
+            subprocess.check_call(
+                [
+                    "ffmpeg",
+                    "-y",
+                    "-hide_banner",
+                    "-loglevel",
+                    "error",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "sine=frequency=440:sample_rate=48000",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "color=c=red:s=32x32:r=24",
+                    "-map",
+                    "1:v:0",
+                    "-map",
+                    "0:a:0",
+                    "-frames:v",
+                    "31",
+                    "-c:v",
+                    "libx264",
+                    "-pix_fmt",
+                    "yuv420p",
+                    "-c:a",
+                    "aac",
+                    "-shortest",
+                    src,
+                ],
+                timeout=30,
+            )
+            self.assertEqual(count_video_frames(src), 31)
+            first = os.path.join(work, "a.mp4")
+            second = os.path.join(work, "b.mp4")
+            extract_frame_range(src, first, 0, 16)
+            extract_frame_range(src, second, 15, 31)
+            self.assertEqual(count_video_frames(first), 16)
+            self.assertEqual(count_video_frames(second), 16)
+            trimmed = os.path.join(work, "b-trim.mp4")
+            drop_leading_frames(second, trimmed, 1)
+            self.assertEqual(count_video_frames(trimmed), 15)
+            joined = os.path.join(work, "joined.mp4")
+            concat_video_files([first, trimmed], joined)
+            self.assertEqual(count_video_frames(joined), 31)
+
+            stitched = stitch_rife_chunk_outputs(
+                [first, second],
+                PreparedRifeSource(work, src, [first, second], {}),
+            )
+            self.assertEqual(count_video_frames(stitched), 31)
+            self.assertGreater(float(probe_video(stitched).get("duration") or 0), 1.0)
+        except FileNotFoundError:
+            self.skipTest("ffmpeg not available")
+        finally:
+            shutil.rmtree(work, ignore_errors=True)
+
+    def test_prepare_rife_source_bakes_rotation_on_tiny_clip(self) -> None:
+        from r2_put import count_video_frames, prepare_rife_source
+
+        src = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False).name
+        prepared = None
+        try:
+            subprocess.check_call(
+                [
+                    "ffmpeg",
+                    "-y",
+                    "-hide_banner",
+                    "-loglevel",
+                    "error",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "color=c=blue:s=32x16:r=24",
+                    "-frames:v",
+                    "8",
+                    "-c:v",
+                    "libx264",
+                    "-pix_fmt",
+                    "yuv420p",
+                    src,
+                ],
+                timeout=30,
+            )
+            prepared = prepare_rife_source(
+                {
+                    "video_path": src,
+                    "fps": 60,
+                    "source_fps": 24,
+                    "fps_changed": True,
+                    "scale_changed": False,
+                    "rotation": 90,
+                    "width": 32,
+                    "height": 16,
+                    "duration": 8 / 24,
+                }
+            )
+            self.assertIsNotNone(prepared)
+            assert prepared is not None
+            self.assertEqual(len(prepared.chunk_paths), 1)
+            self.assertEqual(prepared.work_input.get("rotation"), 0)
+            probe = probe_video(prepared.source_path)
+            self.assertEqual(probe.get("width"), 16)
+            self.assertEqual(probe.get("height"), 32)
+            self.assertEqual(count_video_frames(prepared.source_path), 8)
+        except FileNotFoundError:
+            self.skipTest("ffmpeg not available")
+        finally:
+            if os.path.isfile(src):
+                os.unlink(src)
+            if prepared is not None:
+                shutil.rmtree(prepared.work_dir, ignore_errors=True)
 
 
 if __name__ == "__main__":

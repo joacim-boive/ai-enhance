@@ -196,6 +196,9 @@ export function gpuIssueFromLogLine(line: string): string | null {
   if (/unauthorized|access denied/i.test(line) && /registry|pull|hub/i.test(line)) {
     return "Container registry denied the image pull.";
   }
+  if (/triggered memory limits|container is unhealthy.*oom/i.test(line)) {
+    return "GPU worker ran out of RAM interpolating this clip. Retry the job — 24→60 runs RIFE in overlapping chunks so the whole clip is not 5× in memory at once.";
+  }
   return null;
 }
 

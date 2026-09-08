@@ -5,11 +5,17 @@ from vram import (
     apply_rife_fps,
     bypass_seedvr2,
     cap_resolution,
+    clip_source_frames,
+    needs_rife_chunking,
     patch_seedvr2_prompt,
     requested_resolution,
+    rife_chunk_ranges,
+    rife_chunk_source_frames,
     rife_fps_plan,
     rife_output_fps,
+    rife_working_dimensions,
     should_skip_upscale,
+    wants_rife_preprocess,
 )
 
 
@@ -115,6 +121,12 @@ class VramTests(unittest.TestCase):
         self.assertEqual(multiplier, 5)
         self.assertEqual(dense, 120)
 
+        capped = rife_fps_plan(24, 60, max_multiplier=2)
+        self.assertEqual(capped.multiplier, 2)
+        self.assertEqual(capped.rife_fps, 48)
+        self.assertEqual(capped.output_fps, 60)
+        self.assertTrue(capped.resample)
+
         plan = rife_fps_plan(30, 60)
         self.assertEqual(plan.multiplier, 2)
         self.assertEqual(plan.rife_fps, 60)
@@ -146,7 +158,54 @@ class VramTests(unittest.TestCase):
         self.assertEqual(patched["25"]["inputs"]["frame_rate"], 60)
         apply_rife_fps(patched, {"fps": 60, "source_fps": 30})
 
-    def test_fps_only_24_to_60_encodes_120_for_ffmpeg_decimate(self) -> None:
+    def _decimate_node(self, prompt: dict) -> dict:
+        for node in prompt.values():
+            if node.get("class_type") == "VHS_SelectEveryNthImage":
+                return node
+        self.fail("expected VHS_SelectEveryNthImage in the graph")
+
+    def test_phone_clips_chunk_instead_of_capping_rife(self) -> None:
+        phone = {
+            "width": 1080,
+            "height": 1920,
+            "duration": 10,
+            "source_fps": 24,
+            "fps": 60,
+            "fps_changed": True,
+            "scale_changed": False,
+        }
+        self.assertTrue(wants_rife_preprocess(phone))
+        self.assertTrue(needs_rife_chunking(phone))
+        self.assertEqual(clip_source_frames(phone), 240)
+        self.assertEqual(rife_working_dimensions(phone), (1080, 1920))
+        chunk = rife_chunk_source_frames(1080, 1920, 5)
+        self.assertGreaterEqual(chunk, 8)
+        self.assertLess(chunk, 80)
+        tiny = {
+            "width": 64,
+            "height": 64,
+            "duration": 1,
+            "source_fps": 24,
+            "fps": 60,
+            "fps_changed": True,
+            "scale_changed": False,
+        }
+        self.assertFalse(needs_rife_chunking(tiny))
+
+    def test_rife_chunk_ranges_overlap_covers_every_source_frame(self) -> None:
+        self.assertEqual(rife_chunk_ranges(10, 25), [(0, 10)])
+        ranges = rife_chunk_ranges(31, 16, overlap=1)
+        self.assertEqual(ranges, [(0, 16), (15, 31)])
+        kept = 0
+        for index, (start, end) in enumerate(ranges):
+            kept += (end - start) if index == 0 else (end - start - 1)
+        self.assertEqual(kept, 31)
+        tail = rife_chunk_ranges(32, 16, overlap=1)
+        self.assertEqual(tail[0], (0, 16))
+        self.assertEqual(tail[-1][1], 32)
+        self.assertGreaterEqual(tail[-1][1] - tail[-1][0], 2)
+
+    def test_fps_only_24_to_60_uses_5x_and_decimates_in_graph(self) -> None:
         patched = patch_seedvr2_prompt(
             copy.deepcopy(INTERP_PROMPT),
             {
@@ -157,10 +216,30 @@ class VramTests(unittest.TestCase):
             },
         )
         self.assertEqual(patched["26"]["inputs"]["multiplier"], 5)
-        self.assertEqual(patched["25"]["inputs"]["frame_rate"], 120)
-        self.assertEqual(patched["25"]["inputs"]["images"], ["26", 0])
-        self.assertNotIn("lumen_decimate_25", patched)
+        self.assertEqual(patched["25"]["inputs"]["frame_rate"], 60)
+        nth = self._decimate_node(patched)
+        self.assertEqual(nth["inputs"]["select_every_nth"], 2)
+        self.assertEqual(nth["inputs"]["images"], ["26", 0])
+        self.assertEqual(patched["25"]["inputs"]["images"][0] in patched, True)
+        self.assertEqual(patched[patched["25"]["inputs"]["images"][0]]["class_type"], "VHS_SelectEveryNthImage")
         self.assertNotIn("10", patched)
+
+    def test_tiny_clip_24_to_60_still_uses_5x(self) -> None:
+        patched = patch_seedvr2_prompt(
+            copy.deepcopy(INTERP_PROMPT),
+            {
+                "scale_changed": False,
+                "fps_changed": True,
+                "fps": 60,
+                "source_fps": 24,
+                "width": 64,
+                "height": 64,
+                "duration": 1,
+            },
+        )
+        self.assertEqual(patched["26"]["inputs"]["multiplier"], 5)
+        self.assertEqual(patched["25"]["inputs"]["frame_rate"], 60)
+        self.assertEqual(self._decimate_node(patched)["inputs"]["select_every_nth"], 2)
 
     def test_upscale_and_fps_still_sets_rife_for_24_to_60(self) -> None:
         patched = patch_seedvr2_prompt(
@@ -175,8 +254,20 @@ class VramTests(unittest.TestCase):
         )
         self.assertIn("10", patched)
         self.assertEqual(patched["26"]["inputs"]["multiplier"], 5)
-        self.assertEqual(patched["25"]["inputs"]["frame_rate"], 120)
-        self.assertEqual(patched["25"]["inputs"]["images"][0], "26")
+        self.assertEqual(patched["25"]["inputs"]["frame_rate"], 60)
+        self.assertEqual(patched["25"]["inputs"]["images"][0] in patched, True)
+        self.assertEqual(
+            rife_working_dimensions(
+                {
+                    "width": 1080,
+                    "height": 1920,
+                    "scale_changed": True,
+                    "fps_changed": True,
+                    "resolution": 2160,
+                }
+            ),
+            (2160, 3840),
+        )
 
 if __name__ == "__main__":
     unittest.main()

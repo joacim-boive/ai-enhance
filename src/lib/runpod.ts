@@ -363,6 +363,9 @@ export async function submitGpuJob(input: {
   fpsChanged: boolean;
   fps?: number;
   sourceFps?: number;
+  width?: number;
+  height?: number;
+  duration?: number;
   resolution: number;
   rotation?: number;
 }): Promise<string> {
@@ -383,6 +386,9 @@ export async function submitGpuJob(input: {
     skip_upscale: gpuSkipUpscale(input.scaleChanged, input.fpsChanged),
     fps: input.fps,
     source_fps: input.sourceFps,
+    width: input.width,
+    height: input.height,
+    duration: input.duration,
     rotation: input.rotation ?? 0,
     multipart: {
       uploadId: input.multipart.uploadId,
@@ -588,9 +594,13 @@ export function gpuOutputError(output: unknown): string | null {
 }
 
 export function isGpuOom(text: string): boolean {
-  return /allocation on device|out of memory|cuda oom|cudnn_status_alloc_failed/i.test(
+  return /allocation on device|out of memory|cuda oom|cudnn_status_alloc_failed|triggered memory limits/i.test(
     text,
   );
+}
+
+export function isGpuContainerRamOom(text: string): boolean {
+  return /triggered memory limits/i.test(text);
 }
 
 export function isGpuWebsocketDrop(text: string): boolean {
@@ -619,6 +629,9 @@ function workerErrorText(text: string): string {
 
 export function gpuFailureMessage(text: string, status?: string): string {
   const extracted = workerErrorText(text);
+  if (isGpuContainerRamOom(extracted)) {
+    return "GPU worker ran out of RAM interpolating this clip. Retry the job — 24→60 runs RIFE in overlapping chunks so the whole clip is not 5× in memory at once.";
+  }
   if (isGpuOom(extracted)) {
     return "GPU ran out of VRAM during SeedVR2 encoding (Allocation on device). 4K clips stay at 4K on the RTX 4090; retry at source size or a lower scale.";
   }

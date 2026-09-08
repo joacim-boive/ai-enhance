@@ -9,9 +9,12 @@ Deploy this file as /handler.py after copying the original Hub handler to
 
 from __future__ import annotations
 
+import copy
+import gc
 import json
 import os
 import runpy
+import shutil
 import sys
 import time
 from contextvars import ContextVar
@@ -23,7 +26,14 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)) or "/")
 import runpod.serverless as serverless
 
 from progress import comfy_progress_percent
-from r2_put import upload_master
+from r2_put import (
+    PreparedRifeSource,
+    _find_video_path,
+    _newest_mp4,
+    prepare_rife_source,
+    stitch_rife_chunk_outputs,
+    upload_master,
+)
 from vram import (
     apply_cuda_alloc,
     cap_resolution,
@@ -189,26 +199,83 @@ def _install_hub_patches() -> None:
         main._lumen_wait_patched = True
 
 
+def _copy_chunk_output(output: Any, dest: str) -> str:
+    path = _find_video_path(output)
+    if path is None:
+        path = _newest_mp4()
+    if path is None or not os.path.isfile(path):
+        raise RuntimeError("RIFE chunk produced no video file.")
+    if os.path.abspath(path) != os.path.abspath(dest):
+        shutil.copy2(path, dest)
+    return dest
+
+
+def _release_chunk_ram() -> None:
+    gc.collect()
+    try:
+        import torch
+
+        torch.cuda.empty_cache()
+    except Exception:
+        pass
+
+
+def _run_rife_chunks(inner, job: Any, prepared: PreparedRifeSource) -> dict[str, Any]:
+    outputs: list[str] = []
+    total = max(1, len(prepared.chunk_paths))
+    for index, chunk_path in enumerate(prepared.chunk_paths):
+        _progress(
+            24 + int(62 * index / total),
+            "Enhancing on GPU",
+            f"RIFE chunk {index + 1}/{total}",
+        )
+        chunk_job = copy.deepcopy(job) if isinstance(job, dict) else {"input": {}}
+        chunk_input = dict(prepared.work_input)
+        chunk_input["video_path"] = chunk_path
+        chunk_input.pop("video_url", None)
+        chunk_input.pop("video_base64", None)
+        chunk_job["input"] = chunk_input
+        result = inner(chunk_job)
+        if isinstance(result, dict) and result.get("error"):
+            return result
+        dest = os.path.join(prepared.work_dir, f"out_{index:03d}.mp4")
+        outputs.append(_copy_chunk_output(result, dest))
+        _release_chunk_ram()
+    stitched = stitch_rife_chunk_outputs(outputs, prepared)
+    return {"video_path": stitched}
+
+
 def _patched_start(config):
     _install_hub_patches()
     inner = config["handler"]
 
     def handler(job):
         payload = job.get("input") if isinstance(job, dict) else {}
-        input_token = _job_input.set(payload if isinstance(payload, dict) else {})
+        working = payload if isinstance(payload, dict) else {}
         job_token = _current_job.set(job)
+        prepared = None
+        input_token = None
         try:
             _progress(22, "Starting on GPU", "Worker picked up the job")
-            output = inner(job)
+            prepared = prepare_rife_source(working)
+            work_input = prepared.work_input if prepared is not None else working
+            input_token = _job_input.set(work_input)
+            if prepared is not None:
+                output = _run_rife_chunks(inner, job, prepared)
+            else:
+                output = inner(job)
             if isinstance(output, dict) and output.get("error"):
                 return output
             _progress(88, "Uploading master", "Streaming the mp4 to private R2")
-            uploaded = upload_master(payload if isinstance(payload, dict) else {}, output)
+            uploaded = upload_master(work_input, output)
             _progress(96, "Uploading master", "Master landed in R2")
             return uploaded
         finally:
+            if prepared is not None:
+                shutil.rmtree(prepared.work_dir, ignore_errors=True)
             _current_job.reset(job_token)
-            _job_input.reset(input_token)
+            if input_token is not None:
+                _job_input.reset(input_token)
 
     _real_start({**config, "handler": handler})
 

@@ -371,6 +371,9 @@ async function dispatchGpu(job: Job, target: OutputTarget): Promise<string> {
     fpsChanged: target.fpsChanged,
     fps: target.fps,
     sourceFps: meta.fps,
+    width: meta.width,
+    height: meta.height,
+    duration: meta.durationSec,
     resolution: hub.resolution,
     rotation: meta.rotation,
   });
