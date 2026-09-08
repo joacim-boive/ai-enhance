@@ -289,6 +289,15 @@ export function parseGpuProgressOutput(output: unknown): {
   if (output == null) {
     return null;
   }
+  if (Array.isArray(output)) {
+    for (let index = output.length - 1; index >= 0; index -= 1) {
+      const parsed = parseGpuProgressOutput(output[index]);
+      if (parsed) {
+        return parsed;
+      }
+    }
+    return null;
+  }
   if (typeof output === "string") {
     const trimmed = output.trim();
     if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
