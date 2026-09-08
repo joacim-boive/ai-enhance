@@ -2,10 +2,12 @@ import copy
 import unittest
 
 from vram import (
+    apply_rife_fps,
     bypass_seedvr2,
     cap_resolution,
     patch_seedvr2_prompt,
     requested_resolution,
+    rife_output_fps,
     should_skip_upscale,
 )
 
@@ -100,6 +102,32 @@ class VramTests(unittest.TestCase):
         patched = bypass_seedvr2(copy.deepcopy(INTERP_PROMPT))
         self.assertEqual(patched["26"]["inputs"]["frames"], ["22", 0])
         self.assertNotIn("10", patched)
+
+    def test_rife_output_fps_doubles_24_to_48_not_60(self) -> None:
+        multiplier, fps = rife_output_fps(24, 60)
+        self.assertEqual(multiplier, 2)
+        self.assertEqual(fps, 48)
+        multiplier, fps = rife_output_fps(30, 60)
+        self.assertEqual(multiplier, 2)
+        self.assertEqual(fps, 60)
+        multiplier, fps = rife_output_fps(30, 120)
+        self.assertEqual(multiplier, 4)
+        self.assertEqual(fps, 120)
+
+    def test_fps_only_sets_rife_multiplier_and_output_rate(self) -> None:
+        patched = patch_seedvr2_prompt(
+            copy.deepcopy(INTERP_PROMPT),
+            {
+                "scale_changed": False,
+                "fps_changed": True,
+                "fps": 60,
+                "source_fps": 30,
+            },
+        )
+        self.assertEqual(patched["26"]["inputs"]["multiplier"], 2)
+        self.assertFalse(patched["26"]["inputs"]["ensemble"])
+        self.assertEqual(patched["25"]["inputs"]["frame_rate"], 60)
+        apply_rife_fps(patched, {"fps": 60, "source_fps": 30})
 
 
 if __name__ == "__main__":

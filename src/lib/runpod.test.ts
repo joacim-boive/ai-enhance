@@ -9,6 +9,7 @@ import {
   gpuWarmupMessage,
   isGpuConfigured,
   isGpuOom,
+  isGpuWebsocketDrop,
   parseGpuObjectOutput,
   runpodConfig,
 } from "./runpod";
@@ -58,6 +59,17 @@ test("gpuFailureMessage rewrites SeedVR2 device allocation OOMs", () => {
     /VRAM/,
   );
   assert.equal(gpuFailureMessage("", "FAILED"), "GPU job failed");
+});
+
+test("gpuFailureMessage extracts websocket drops and does not mention CPU fallback", () => {
+  const raw = JSON.stringify({
+    error_type: "<class 'websocket._exceptions.WebSocketConnectionClosedException'>",
+    error_message: "Connection to remote host was lost.",
+  });
+  assert.equal(isGpuWebsocketDrop(raw), true);
+  const message = gpuFailureMessage(raw);
+  assert.match(message, /RTX 4090/);
+  assert.doesNotMatch(message, /CPU interpolation/i);
 });
 
 test("gpuShouldAlert stays quiet when the worker is merely cold or unset", () => {

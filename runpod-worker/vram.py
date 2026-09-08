@@ -16,6 +16,7 @@ VAE_TYPE = "SeedVR2LoadVAEModel"
 DIT_TYPE = "SeedVR2LoadDiTModel"
 RIFE_TYPE = "RIFE VFI"
 VIDEO_COMPONENTS_TYPE = "GetVideoComponents"
+COMBINE_TYPE = "VHS_VideoCombine"
 
 
 def max_short_side() -> int:
@@ -75,6 +76,54 @@ def _as_int(value: Any, default: int) -> int:
         return int(value)
     except (TypeError, ValueError):
         return default
+
+
+def _as_float(value: Any) -> float | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not number or number <= 0:
+        return None
+    return number
+
+
+def rife_output_fps(source_fps: float, target_fps: float) -> tuple[int, float]:
+    """RIFE uses an integer multiplier. Preserve duration: output fps = source * multiplier."""
+    ratio = target_fps / source_fps
+    if abs(ratio - 4) <= abs(ratio - 2) and ratio >= 3:
+        multiplier = 4
+    else:
+        multiplier = 2
+    return multiplier, source_fps * multiplier
+
+
+def apply_rife_fps(prompt: dict[str, Any], job_input: dict[str, Any] | None) -> dict[str, Any]:
+    if not job_input:
+        return prompt
+    target = _as_float(job_input.get("fps"))
+    if target is None:
+        target = _as_float(job_input.get("target_fps"))
+    source = _as_float(job_input.get("source_fps"))
+    multiplier = 2
+    frame_rate: float | None = None
+    if source is not None and target is not None:
+        multiplier, frame_rate = rife_output_fps(source, target)
+    elif target is not None:
+        frame_rate = target
+    for node in prompt.values():
+        class_type = _node_type(node)
+        inputs = _node_inputs(node) if isinstance(node, dict) else {}
+        if class_type == RIFE_TYPE:
+            inputs["multiplier"] = multiplier
+            inputs["ensemble"] = False
+            inputs["fast_mode"] = True
+            inputs["clear_cache_after_n_frames"] = 5
+        elif class_type == COMBINE_TYPE and frame_rate is not None:
+            inputs["frame_rate"] = frame_rate
+    return prompt
 
 
 def _vram_profile(resolution: int) -> dict[str, Any]:
@@ -160,7 +209,7 @@ def patch_seedvr2_prompt(
     job_input: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if should_skip_upscale(job_input):
-        return bypass_seedvr2(prompt)
+        return apply_rife_fps(bypass_seedvr2(prompt), job_input)
     resolution = _resolution_from_prompt(prompt, job_input)
     profile = _vram_profile(resolution)
     for node in prompt.values():
