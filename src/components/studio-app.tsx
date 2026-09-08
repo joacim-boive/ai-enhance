@@ -1,16 +1,28 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { uploadBrowserFile } from "@/lib/browser-upload";
 import { benchFromClip } from "@/lib/library-tree";
 import { readJsonResponse } from "@/lib/http";
 import { DEFAULT_SETTINGS, treatmentLabel } from "@/lib/settings";
-import type { BenchSource, HealthStatus, JobSettings, PublicClip, PublicJob, SourceTransfer, Toast } from "@/lib/types";
+import { playReviewChime } from "@/lib/chime";
+import { isActiveJobStatus, summarizeJobs } from "@/lib/queue-summary";
+import type {
+  BenchSource,
+  HealthStatus,
+  JobSettings,
+  PublicClip,
+  PublicJob,
+  QueueEvent,
+  SourceTransfer,
+  Toast,
+} from "@/lib/types";
 import { AppHeader } from "./app-header";
 import { ComparisonViewer } from "./comparison-viewer";
 import { DropZone } from "./drop-zone";
 import { EnhancePanel } from "./enhance-panel";
 import { JobRail } from "./job-rail";
+import { QueueView } from "./queue-view";
 import { SourceStage } from "./source-stage";
 import { ToastViewport } from "./toast-viewport";
 
@@ -27,123 +39,210 @@ export function StudioApp() {
   const [health, setHealth] = useState<HealthStatus | null>(null);
   const [file, setFile] = useState<BenchSource | null>(null);
   const [settings, setSettings] = useState<JobSettings>(DEFAULT_SETTINGS);
-  const [job, setJob] = useState<PublicJob | null>(null);
+  const [jobs, setJobs] = useState<PublicJob[]>([]);
+  const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
+  const [reviewJobId, setReviewJobId] = useState<string | null>(null);
+  const [showQueue, setShowQueue] = useState<boolean>(() => {
+    if (typeof window === "undefined") {
+      return false;
+    }
+    return new URLSearchParams(window.location.search).get("view") === "queue";
+  });
   const [uploading, setUploading] = useState(false);
   const [transfer, setTransfer] = useState<SourceTransfer | null>(null);
   const [starting, setStarting] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
-  const sourceRef = useRef<PublicJob["status"] | null>(null);
+  const notifiedCompletedIds = useRef<Set<string>>(new Set());
+  const initialLoadDone = useRef(false);
 
-  useEffect(() => {
-    void refreshHealth();
-    const clipId = new URLSearchParams(window.location.search).get("clip");
-    if (clipId) {
-      void loadClipOntoBench(clipId).catch(() => undefined);
-    }
-    const timer = setInterval(() => {
-      void refreshHealth();
-    }, 20000);
-    return () => clearInterval(timer);
-  }, []);
-
-  useEffect(() => {
-    if (!job || job.status === "complete" || job.status === "failed" || job.status === "cancelled") {
-      return;
-    }
-    const source = new EventSource(`/api/jobs/${job.id}/events`);
-    source.onmessage = (event) => {
-      const next = JSON.parse(event.data) as PublicJob;
-      setJob(next);
-    };
-    const timer = window.setInterval(() => {
-      void pollJob(job.id, false);
-    }, 2000);
-    return () => {
-      source.close();
-      window.clearInterval(timer);
-    };
-    // Subscribe once per job id; status updates arrive through the stream and poll.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [job?.id]);
-
-  useEffect(() => {
-    if (!job) {
-      return;
-    }
-    if (sourceRef.current === job.status) {
-      return;
-    }
-    sourceRef.current = job.status;
-    if (job.status === "complete") {
-      pushToast({
-        tone: "success",
-        title: "Master is ready",
-        body: job.fallbackReason
-          ? "Finished on the fallback engine. It’s in the library — try another treatment or continue from this master."
-          : "It’s in the library. Try another treatment on this original, or enhance the master next.",
-      });
-      notifyBrowser("Enhance complete", job.name);
-    }
-    if (job.status === "failed") {
-      pushToast({
-        tone: "error",
-        title: "Could not finish this clip",
-        body: job.error ?? "Try retrying, or switch the engine to CPU.",
-      });
-    }
-    if (job.fallbackReason && job.engine === "cpu" && job.status !== "complete") {
-      pushToast({
-        tone: "warn",
-        title: "Switched to CPU fallback",
-        body: job.fallbackReason,
-      });
-    }
-  }, [job]);
-
-  async function refreshHealth() {
-    const data = await fetchHealth();
-    setHealth(data);
-    return data;
-  }
-
-  async function pollJob(id: string, repeat = true) {
-    try {
-      const response = await fetch(`/api/jobs/${id}`, { cache: "no-store" });
-      if (!response.ok) {
-        return;
-      }
-      const data = await readJsonResponse<{ job: PublicJob }>(response);
-      setJob(data.job);
-      if (
-        repeat &&
-        data.job.status !== "complete" &&
-        data.job.status !== "failed" &&
-        data.job.status !== "cancelled"
-      ) {
-        window.setTimeout(() => {
-          void pollJob(id);
-        }, 1200);
-      }
-    } catch {
-      if (repeat) {
-        window.setTimeout(() => {
-          void pollJob(id);
-        }, 2000);
-      }
-    }
-  }
-
-  function pushToast(toast: Omit<Toast, "id">) {
+  const pushToast = useCallback((toast: Omit<Toast, "id">) => {
     const id = crypto.randomUUID();
     setToasts((current) => [...current.slice(-4), { ...toast, id }]);
     window.setTimeout(() => {
       setToasts((current) => current.filter((item) => item.id !== id));
-    }, 7000);
-  }
+    }, 8000);
+  }, []);
+
+  const handleReview = useCallback((targetJob: PublicJob) => {
+    setReviewJobId(targetJob.id);
+    setSelectedJobId(targetJob.id);
+  }, []);
+
+  const notifyJobComplete = useCallback(
+    (job: PublicJob) => {
+      if (notifiedCompletedIds.current.has(job.id)) {
+        return;
+      }
+      notifiedCompletedIds.current.add(job.id);
+      pushToast({
+        tone: "success",
+        title: "Enhancement ready for review",
+        body: `${job.name} has finished enhancing. Click to review.`,
+        action: {
+          label: "Review",
+          onClick: () => handleReview(job),
+        },
+      });
+      playReviewChime();
+      void notifyBrowser(
+        "Enhancement ready for review",
+        `${job.name} has finished enhancing. Click to inspect.`,
+        () => handleReview(job),
+      );
+    },
+    [handleReview, pushToast],
+  );
+
+  const handleIncomingJobUpdate = useCallback(
+    (updated: PublicJob) => {
+      setJobs((prev) => {
+        const exists = prev.some((j) => j.id === updated.id);
+        if (exists) {
+          return prev.map((j) => (j.id === updated.id ? updated : j));
+        }
+        return [updated, ...prev];
+      });
+
+      if (updated.status === "complete") {
+        notifyJobComplete(updated);
+      } else if (updated.status === "failed" && !notifiedCompletedIds.current.has(updated.id)) {
+        notifiedCompletedIds.current.add(updated.id);
+        pushToast({
+          tone: "error",
+          title: "Could not finish this clip",
+          body: updated.error ?? "Try retrying, or switch the engine to CPU.",
+        });
+      }
+    },
+    [notifyJobComplete, pushToast],
+  );
+
+  const loadJobs = useCallback(async (): Promise<void> => {
+    try {
+      const response = await fetch("/api/jobs", { cache: "no-store" });
+      if (!response.ok) {
+        return;
+      }
+      const data = await readJsonResponse<{ jobs: PublicJob[] }>(response);
+      setJobs(data.jobs);
+
+      if (!initialLoadDone.current) {
+        initialLoadDone.current = true;
+        for (const j of data.jobs) {
+          if (j.status === "complete") {
+            notifiedCompletedIds.current.add(j.id);
+          }
+        }
+      } else {
+        for (const j of data.jobs) {
+          if (j.status === "complete" && !notifiedCompletedIds.current.has(j.id)) {
+            notifyJobComplete(j);
+          }
+        }
+      }
+    } catch {
+      // Ignore network errors on job polling
+    }
+  }, [notifyJobComplete]);
+
+  const loadClipOntoBench = useCallback(async (clipId: string) => {
+    const response = await fetch(`/api/clips/${clipId}`, { cache: "no-store" });
+    const data = await readJsonResponse<{ clip?: PublicClip; error?: string }>(response);
+    if (!response.ok || !data.clip) {
+      throw new Error(data.error || "Could not open that clip");
+    }
+    const bench = benchFromClip(data.clip);
+    if (!bench) {
+      throw new Error("That clip is missing video stats. Try probing it again from an upload.");
+    }
+    setFile(bench);
+  }, []);
+
+  useEffect(() => {
+    let unmounted = false;
+    const init = async () => {
+      const h = await fetchHealth();
+      if (!unmounted) {
+        setHealth(h);
+      }
+      await loadJobs();
+      const params = new URLSearchParams(window.location.search);
+      const clipId = params.get("clip");
+      if (clipId && !unmounted) {
+        void loadClipOntoBench(clipId).catch(() => undefined);
+      }
+    };
+    void init();
+    const timer = setInterval(() => {
+      void (async () => {
+        const h = await fetchHealth();
+        if (!unmounted) {
+          setHealth(h);
+        }
+      })();
+    }, 20000);
+    return () => {
+      unmounted = true;
+      clearInterval(timer);
+    };
+  }, [loadClipOntoBench, loadJobs]);
+
+  // SSE connection for real-time queue and job updates
+  useEffect(() => {
+    let active = true;
+    const source = new EventSource("/api/queue/events");
+
+    source.onmessage = (event) => {
+      if (!active) {
+        return;
+      }
+      try {
+        const payload = JSON.parse(event.data) as QueueEvent;
+        if (payload.type === "init") {
+          setJobs(payload.jobs);
+          if (!initialLoadDone.current) {
+            initialLoadDone.current = true;
+            for (const j of payload.jobs) {
+              if (j.status === "complete") {
+                notifiedCompletedIds.current.add(j.id);
+              }
+            }
+          }
+        } else if (payload.type === "job") {
+          const updated = payload.job;
+          handleIncomingJobUpdate(updated);
+        }
+      } catch (err) {
+        console.error("Failed to parse queue event", err);
+      }
+    };
+
+    source.onerror = () => {
+      // SSE error fallback — polling handles background recovery
+    };
+
+    return () => {
+      active = false;
+      source.close();
+    };
+  }, [handleIncomingJobUpdate]);
+
+  // Polling fallback while active jobs are running
+  const metrics = summarizeJobs(jobs);
+  const hasActiveJobs = metrics.active > 0;
+
+  useEffect(() => {
+    if (!hasActiveJobs) {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      void loadJobs();
+    }, 2500);
+    return () => window.clearInterval(timer);
+  }, [hasActiveJobs, loadJobs]);
 
   async function uploadFile(input: File) {
     setUploading(true);
-    setJob(null);
     setTransfer({
       phase: "preparing",
       name: input.name,
@@ -182,7 +281,6 @@ export function StudioApp() {
 
   async function importDrive(url: string) {
     setUploading(true);
-    setJob(null);
     setTransfer({
       phase: "importing",
       name: "Google Drive",
@@ -225,7 +323,6 @@ export function StudioApp() {
 
   async function loadSample() {
     setUploading(true);
-    setJob(null);
     setTransfer({
       phase: "probing",
       name: "24 fps sample",
@@ -283,14 +380,20 @@ export function StudioApp() {
       if (!response.ok || !data.job) {
         throw new Error(data.error || "Could not start the job");
       }
-      setJob(data.job);
-      sourceRef.current = data.job.status;
+
+      const createdJob = data.job;
+      setJobs((prev) => [createdJob, ...prev.filter((j) => j.id !== createdJob.id)]);
+      setSelectedJobId(createdJob.id);
+
       pushToast({
         tone: "info",
-        title: "Enhancement started",
-        body: health?.gpu.configured
-          ? "Trying the GPU first. We’ll fall back if it can’t warm up."
-          : "GPU is unset on this deployment, so this run uses CPU.",
+        title: metrics.active > 0 ? "Enhancement queued" : "Enhancement started",
+        body:
+          metrics.active > 0
+            ? `Added to queue as #${metrics.queued + 1}. You can begin another video anytime.`
+            : health?.gpu.configured
+              ? "Trying GPU first. We’ll fall back if it can’t warm up."
+              : "Processing on CPU. You can queue more videos anytime.",
       });
     } catch (error) {
       pushToast({
@@ -303,81 +406,102 @@ export function StudioApp() {
     }
   }
 
-  async function cancel() {
-    if (!job) {
-      return;
+  async function cancel(jobId: string) {
+    try {
+      const response = await fetch(`/api/jobs/${jobId}/cancel`, { method: "POST" });
+      const data = await readJsonResponse<{ job?: PublicJob }>(response);
+      if (data.job) {
+        const nextJob = data.job;
+        setJobs((prev) => prev.map((j) => (j.id === jobId ? nextJob : j)));
+      }
+      pushToast({
+        tone: "warn",
+        title: "Enhancement cancelled",
+        body: "The job was removed from active processing.",
+      });
+    } catch {
+      pushToast({
+        tone: "error",
+        title: "Could not cancel",
+        body: "Unable to cancel the requested job.",
+      });
     }
-    await fetch(`/api/jobs/${job.id}/cancel`, { method: "POST" });
   }
 
-  async function retry() {
-    if (!job) {
-      return;
-    }
-    const response = await fetch(`/api/jobs/${job.id}/retry`, { method: "POST" });
-    const data = await readJsonResponse<{ job?: PublicJob }>(response);
-    if (data.job) {
-      setJob(data.job);
+  async function retry(jobId: string) {
+    try {
+      const response = await fetch(`/api/jobs/${jobId}/retry`, { method: "POST" });
+      const data = await readJsonResponse<{ job?: PublicJob }>(response);
+      if (data.job) {
+        const retried = data.job;
+        setJobs((prev) => prev.map((j) => (j.id === jobId ? retried : j)));
+        setSelectedJobId(jobId);
+        pushToast({
+          tone: "info",
+          title: "Enhancement requeued",
+          body: "Job is back in the queue for processing.",
+        });
+      }
+    } catch {
+      pushToast({
+        tone: "error",
+        title: "Could not retry",
+        body: "Unable to retry the job.",
+      });
     }
   }
 
-  async function loadClipOntoBench(clipId: string) {
-    const response = await fetch(`/api/clips/${clipId}`, { cache: "no-store" });
-    const data = await readJsonResponse<{ clip?: PublicClip; error?: string }>(response);
-    if (!response.ok || !data.clip) {
-      throw new Error(data.error || "Could not open that clip");
-    }
-    const bench = benchFromClip(data.clip);
-    if (!bench) {
-      throw new Error("That clip is missing video stats. Try probing it again from an upload.");
-    }
-    setFile(bench);
-    setJob(null);
-  }
-
-  async function continueFromMaster() {
-    if (!job?.outputUrl || !job.outputMeta) {
+  async function continueFromMaster(targetJob: PublicJob) {
+    if (!targetJob.outputUrl || !targetJob.outputMeta) {
       return;
     }
-    if (job.outputClipId) {
+    if (targetJob.outputClipId) {
       try {
-        await loadClipOntoBench(job.outputClipId);
-        sourceRef.current = null;
+        await loadClipOntoBench(targetJob.outputClipId);
+        setReviewJobId(null);
         return;
       } catch {
         // Fall through to a local bench from the finished job.
       }
     }
     setFile({
-      id: job.outputClipId ?? job.id,
-      clipId: job.outputClipId ?? job.id,
+      id: targetJob.outputClipId ?? targetJob.id,
+      clipId: targetJob.outputClipId ?? targetJob.id,
       fileId: file?.fileId ?? null,
-      name: job.name,
-      url: job.outputUrl,
-      meta: job.outputMeta,
-      thumbs: job.thumbs,
+      name: targetJob.name,
+      url: targetJob.outputUrl,
+      meta: targetJob.outputMeta,
+      thumbs: targetJob.thumbs,
       kind: "version",
-      treatment: treatmentLabel(job.settings),
-      parentClipId: job.sourceClipId ?? file?.clipId ?? null,
-      rootClipId: file?.rootClipId ?? job.sourceClipId ?? job.id,
+      treatment: treatmentLabel(targetJob.settings),
+      parentClipId: targetJob.sourceClipId ?? file?.clipId ?? null,
+      rootClipId: file?.rootClipId ?? targetJob.sourceClipId ?? targetJob.id,
     });
-    setJob(null);
-    sourceRef.current = null;
+    setReviewJobId(null);
   }
 
-  const working =
-    uploading ||
-    starting ||
-    job?.status === "queued" ||
-    job?.status === "probing" ||
-    job?.status === "warming" ||
-    job?.status === "processing" ||
-    job?.status === "encoding";
+  // Active / selected jobs for display
+  const selectedJob =
+    jobs.find((j) => j.id === selectedJobId) ??
+    jobs.find((j) => isActiveJobStatus(j.status)) ??
+    null;
+  const reviewJob = jobs.find((j) => j.id === reviewJobId && j.status === "complete") ?? null;
+
   const panelSettings = settingsForHealth(settings, health);
+  const canEnhance = Boolean(file) && !uploading && !starting;
+  const buttonLabel = metrics.active > 0 ? "Queue enhancement" : "Enhance video";
+  const workingLabel = uploading ? "Uploading…" : starting ? "Queuing…" : "Working…";
 
   return (
     <div className="relative mx-auto min-h-screen w-full max-w-[1440px] px-5 pb-20 pt-6 md:px-8">
-      <AppHeader health={health} />
+      <AppHeader
+        health={health}
+        activeJobCount={metrics.active}
+        totalJobCount={metrics.total}
+        isQueueOpen={showQueue}
+        onToggleQueue={() => setShowQueue(!showQueue)}
+      />
+
       {health?.hosting === "vercel" && !health.r2?.configured ? (
         <div className="mb-6 rounded-2xl border border-[var(--gold)]/40 bg-[rgba(226,181,122,0.08)] px-4 py-3 text-sm leading-6 text-[var(--gold)]">
           Cloudflare R2 is unset on this deployment. Private GB masters cannot land until
@@ -385,6 +509,7 @@ export function StudioApp() {
           SESSION_SECRET are set, then Redeploy.
         </div>
       ) : null}
+
       <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">
         <div>
           {file ? (
@@ -392,7 +517,6 @@ export function StudioApp() {
               file={file}
               onClear={() => {
                 setFile(null);
-                setJob(null);
               }}
             />
           ) : (
@@ -409,17 +533,94 @@ export function StudioApp() {
           settings={panelSettings}
           meta={file?.meta ?? null}
           health={health}
-          working={working}
-          workingLabel={uploading ? "Uploading…" : "Working…"}
-          canEnhance={Boolean(file) && !working}
+          working={starting || uploading}
+          workingLabel={workingLabel}
+          buttonLabel={buttonLabel}
+          canEnhance={canEnhance}
           onChange={setSettings}
           onEnhance={() => void enhance()}
         />
       </div>
-      {job ? <JobRail job={job} onCancel={() => void cancel()} onRetry={() => void retry()} /> : null}
-      {job?.status === "complete" && job.outputUrl ? (
-        <ComparisonViewer job={job} onContinue={() => void continueFromMaster()} />
+
+      {/* Queue summary bar giving immediate option to view queue & progress */}
+      {jobs.length > 0 ? (
+        <div className="mt-6 flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-[var(--line)] bg-black/25 px-5 py-3.5">
+          <div className="flex items-center gap-3">
+            <span className="font-mono text-xs uppercase tracking-[0.16em] text-[var(--gold)] font-medium">
+              Queue Status
+            </span>
+            <span className="text-xs text-[var(--muted)]">
+              {metrics.active > 0
+                ? `${metrics.active} active job${metrics.active === 1 ? "" : "s"} · ${metrics.queued} queued`
+                : `${metrics.complete} completed master${metrics.complete === 1 ? "" : "s"} ready for review`}
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {metrics.complete > 0 && !reviewJob ? (
+              <button
+                type="button"
+                onClick={() => {
+                  const latestComplete = jobs.find((j) => j.status === "complete");
+                  if (latestComplete) {
+                    handleReview(latestComplete);
+                  }
+                }}
+                className="rounded-full bg-[linear-gradient(180deg,#f3d7a8,#c48a42)] px-3.5 py-1.5 text-xs uppercase tracking-[0.14em] font-medium text-[#2a1c0a] hover:opacity-90 transition cursor-pointer"
+              >
+                Review latest
+              </button>
+            ) : null}
+
+            <button
+              type="button"
+              onClick={() => setShowQueue(!showQueue)}
+              className="rounded-full border border-[var(--line)] px-4 py-1.5 text-xs uppercase tracking-[0.16em] text-[var(--ink)] hover:border-[var(--line-strong)] transition cursor-pointer"
+            >
+              {showQueue ? "Hide queue" : `View queue (${jobs.length})`}
+            </button>
+          </div>
+        </div>
       ) : null}
+
+      {/* Full Queue View */}
+      {showQueue ? (
+        <QueueView
+          jobs={jobs}
+          selectedJobId={selectedJob?.id ?? null}
+          onSelectJob={(j) => setSelectedJobId(j.id === selectedJobId ? null : j.id)}
+          onReview={(j) => handleReview(j)}
+          onCancel={(id) => void cancel(id)}
+          onRetry={(id) => void retry(id)}
+          onClose={() => setShowQueue(false)}
+        />
+      ) : null}
+
+      {/* Review Comparison Viewer when a completed job is chosen for review */}
+      {reviewJob && reviewJob.outputUrl ? (
+        <div className="mt-6">
+          <div className="mb-2 flex items-center justify-between">
+            <p className="font-serif text-xl tracking-tight text-[var(--gold)]">
+              Reviewing: {reviewJob.name}
+            </p>
+          </div>
+          <ComparisonViewer
+            job={reviewJob}
+            onContinue={() => void continueFromMaster(reviewJob)}
+            onClose={() => setReviewJobId(null)}
+          />
+        </div>
+      ) : null}
+
+      {/* Single Live Rail for active / inspected job when not in full review mode */}
+      {selectedJob && !reviewJob ? (
+        <JobRail
+          job={selectedJob}
+          onCancel={() => void cancel(selectedJob.id)}
+          onRetry={() => void retry(selectedJob.id)}
+        />
+      ) : null}
+
       <ToastViewport
         toasts={toasts}
         onDismiss={(id) => setToasts((current) => current.filter((item) => item.id !== id))}
@@ -445,20 +646,31 @@ function benchFromIngest(data: IngestedFile): BenchSource {
   };
 }
 
-function notifyBrowser(title: string, body: string) {
-  if (typeof Notification === "undefined") {
+async function notifyBrowser(title: string, body: string, onClick?: () => void): Promise<void> {
+  if (typeof window === "undefined" || !("Notification" in window)) {
     return;
   }
-  if (Notification.permission === "granted") {
-    new Notification(title, { body });
-    return;
+  let permission = Notification.permission;
+  if (permission === "default") {
+    try {
+      permission = await Notification.requestPermission();
+    } catch {
+      return;
+    }
   }
-  if (Notification.permission === "default") {
-    void Notification.requestPermission().then((permission) => {
-      if (permission === "granted") {
-        new Notification(title, { body });
+  if (permission === "granted") {
+    try {
+      const notification = new Notification(title, { body });
+      if (onClick) {
+        notification.onclick = () => {
+          window.focus();
+          onClick();
+          notification.close();
+        };
       }
-    });
+    } catch {
+      // Ignore notification failures in restricted sandbox
+    }
   }
 }
 

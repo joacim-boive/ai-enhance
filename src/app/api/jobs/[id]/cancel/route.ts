@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireOwnedJob } from "@/lib/authz";
 import { patchJob, requestCancel, toPublicJob } from "@/lib/jobs";
+import { removeFromQueue } from "@/lib/processor";
 import { cancelGpuJob } from "@/lib/runpod";
 
 export const runtime = "nodejs";
@@ -22,6 +23,7 @@ export async function POST(
   if (job.status === "complete" || job.status === "failed" || job.status === "cancelled") {
     return NextResponse.json({ job: toPublicJob(job) });
   }
+  removeFromQueue(id);
   requestCancel(id);
   if (job.runpodJobId) {
     await cancelGpuJob(job.runpodJobId);

@@ -165,12 +165,37 @@ export type HealthStatus = {
 
 export type ToastTone = "info" | "success" | "warn" | "error";
 
+export type ToastAction = {
+  label: string;
+  onClick: () => void;
+};
+
 export type Toast = {
   id: string;
   title: string;
   body: string;
   tone: ToastTone;
+  action?: ToastAction;
 };
+
+export type QueueStatus = {
+  inFlight: string[];
+  queued: string[];
+  draining: boolean;
+};
+
+export type QueueSummary = {
+  total: number;
+  active: number;
+  queued: number;
+  completed: number;
+  failed: number;
+};
+
+export type QueueEvent =
+  | { type: "init"; jobs: PublicJob[]; queue: QueueStatus }
+  | { type: "job"; job: PublicJob }
+  | { type: "remove"; jobId: string };
 
 export type SourceTransferPhase = "preparing" | "uploading" | "importing" | "probing";
 

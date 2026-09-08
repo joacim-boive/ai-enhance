@@ -16,9 +16,10 @@ type ViewMode = "split" | "side-by-side" | "toggle";
 type Props = {
   job: PublicJob;
   onContinue?: () => void;
+  onClose?: () => void;
 };
 
-export function ComparisonViewer({ job, onContinue }: Props) {
+export function ComparisonViewer({ job, onContinue, onClose }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const sourceRef = useRef<HTMLVideoElement>(null);
   const outputRef = useRef<HTMLVideoElement>(null);
@@ -348,9 +349,18 @@ export function ComparisonViewer({ job, onContinue }: Props) {
             <button
               type="button"
               onClick={onContinue}
-              className="rounded-full border border-[var(--gold)] px-4 py-2 text-xs uppercase tracking-[0.16em] text-[var(--gold)] hover:bg-[var(--gold)] hover:text-[#2a1c0a]"
+              className="rounded-full border border-[var(--gold)] px-4 py-2 text-xs uppercase tracking-[0.16em] text-[var(--gold)] hover:bg-[var(--gold)] hover:text-[#2a1c0a] cursor-pointer"
             >
               Enhance this master
+            </button>
+          ) : null}
+          {onClose ? (
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-full border border-[var(--line)] px-4 py-2 text-xs uppercase tracking-[0.16em] text-[var(--muted)] hover:text-[var(--ink)] hover:border-[var(--line-strong)] cursor-pointer"
+            >
+              Done reviewing
             </button>
           ) : null}
         </div>

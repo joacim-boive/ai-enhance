@@ -4,9 +4,19 @@ import { EngineBadge } from "./engine-badge";
 
 type Props = {
   health?: HealthStatus | null;
+  activeJobCount?: number;
+  totalJobCount?: number;
+  isQueueOpen?: boolean;
+  onToggleQueue?: () => void;
 };
 
-export function AppHeader({ health }: Props) {
+export function AppHeader({
+  health,
+  activeJobCount = 0,
+  totalJobCount = 0,
+  isQueueOpen = false,
+  onToggleQueue,
+}: Props) {
   return (
     <header className="mb-8 flex flex-wrap items-end justify-between gap-4">
       <div>
@@ -24,6 +34,38 @@ export function AppHeader({ health }: Props) {
         </p>
       </div>
       <div className="flex items-center gap-3">
+        {onToggleQueue ? (
+          <button
+            type="button"
+            onClick={onToggleQueue}
+            className={`flex items-center gap-1.5 rounded-full border px-4 py-2 text-xs uppercase tracking-[0.18em] transition cursor-pointer ${
+              isQueueOpen
+                ? "border-[var(--gold)] text-[var(--gold)] bg-[rgba(226,181,122,0.08)]"
+                : "border-[var(--line)] text-[var(--muted)] hover:border-[var(--line-strong)] hover:text-[var(--ink)]"
+            }`}
+          >
+            {activeJobCount > 0 ? (
+              <span className="h-2 w-2 rounded-full bg-[var(--teal)] animate-pulse" />
+            ) : null}
+            <span>Queue</span>
+            {activeJobCount > 0 ? (
+              <span className="rounded-full bg-[rgba(65,182,157,0.2)] px-1.5 py-0.2 text-[10px] text-[var(--teal)] font-mono">
+                {activeJobCount}
+              </span>
+            ) : totalJobCount > 0 ? (
+              <span className="text-[10px] text-[var(--muted)] font-mono">
+                ({totalJobCount})
+              </span>
+            ) : null}
+          </button>
+        ) : (
+          <Link
+            href="/?view=queue"
+            className="rounded-full border border-[var(--line)] px-4 py-2 text-xs uppercase tracking-[0.18em] text-[var(--muted)] transition hover:border-[var(--line-strong)] hover:text-[var(--ink)]"
+          >
+            Queue
+          </Link>
+        )}
         <Link
           href="/library"
           className="rounded-full border border-[var(--line)] px-4 py-2 text-xs uppercase tracking-[0.18em] text-[var(--muted)] transition hover:border-[var(--line-strong)] hover:text-[var(--ink)]"
