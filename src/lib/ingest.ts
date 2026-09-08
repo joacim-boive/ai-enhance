@@ -1,4 +1,5 @@
 import path from "node:path";
+import { ensureOriginalClip } from "./clips";
 import { mediaUploadUrl } from "./keys";
 import { extractThumbnails, probeVideo } from "./probe";
 import {
@@ -16,6 +17,7 @@ import type { VideoMeta } from "./types";
 
 export type IngestedFile = {
   id: string;
+  clipId: string;
   name: string;
   url: string;
   meta: VideoMeta;
@@ -103,8 +105,19 @@ async function finalizeIngest(input: {
     objectKey: input.objectKey,
   };
   await saveStoredFile(record);
+  const clip = await ensureOriginalClip({
+    userId: input.userId,
+    fileId: input.id,
+    name: input.name,
+    url: input.url,
+    pathname: input.pathname,
+    objectKey: input.objectKey ?? null,
+    thumbs,
+    meta,
+  });
   return {
     id: input.id,
+    clipId: clip.id,
     name: input.name,
     url: input.url,
     meta,

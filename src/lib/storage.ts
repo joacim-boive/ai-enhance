@@ -1,11 +1,11 @@
 import { createReadStream } from "node:fs";
-import { copyFile, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { get, list, put } from "@vercel/blob";
 import { blobEnabled, r2Enabled } from "./env";
-import { uploadRecordKey } from "./keys";
+import { uploadPrefix, uploadRecordKey } from "./keys";
 import { DATA_DIR, ensureDirs } from "./paths";
-import { getJsonObject, putJsonObject } from "./r2";
+import { deleteObject, deletePrefix, getJsonObject, listObjectKeys, putJsonObject } from "./r2";
 import { SAMPLE_FILE_ID, SAMPLE_STORED_FILE } from "./sample";
 
 export type StoredFile = {
@@ -179,4 +179,56 @@ export async function loadStoredFile(
     return null;
   }
   return local;
+}
+
+export async function listStoredFiles(userId: string): Promise<StoredFile[]> {
+  const files: StoredFile[] = [];
+  if (r2Enabled()) {
+    const keys = await listObjectKeys(uploadPrefix(userId));
+    for (const key of keys) {
+      if (!/\/uploads\/[0-9a-f-]{36}\.json$/i.test(key)) {
+        continue;
+      }
+      const record = await getJsonObject<StoredFile>(key);
+      if (record && (!record.userId || record.userId === userId)) {
+        files.push(record);
+      }
+    }
+    return files;
+  }
+  const pathnames = await listPathnames("files/");
+  for (const pathname of pathnames) {
+    if (!pathname.endsWith(".json")) {
+      continue;
+    }
+    const record = await readJson<StoredFile>(pathname);
+    if (record && (!record.userId || record.userId === userId)) {
+      files.push(record);
+    }
+  }
+  return files;
+}
+
+export async function deleteLocalPathname(pathname: string): Promise<void> {
+  await rm(localFile(pathname), { recursive: true, force: true });
+}
+
+export async function deleteStoredFile(id: string, userId: string): Promise<void> {
+  if (id === SAMPLE_FILE_ID) {
+    return;
+  }
+  const stored = await loadStoredFile(id, userId);
+  if (r2Enabled() && userId) {
+    await deleteObject(uploadRecordKey(userId, id)).catch(() => undefined);
+    if (stored?.objectKey) {
+      await deleteObject(stored.objectKey).catch(() => undefined);
+    }
+    await deletePrefix(`${uploadPrefix(userId)}${id}/`).catch(() => undefined);
+    return;
+  }
+  await deleteLocalPathname(`files/${id}.json`);
+  if (stored?.pathname) {
+    await deleteLocalPathname(stored.pathname);
+  }
+  await deleteLocalPathname(`thumbs/${id}`);
 }

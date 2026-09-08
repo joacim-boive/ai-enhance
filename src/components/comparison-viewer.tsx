@@ -7,9 +7,10 @@ import type { PublicJob } from "@/lib/types";
 
 type Props = {
   job: PublicJob;
+  onContinue?: () => void;
 };
 
-export function ComparisonViewer({ job }: Props) {
+export function ComparisonViewer({ job, onContinue }: Props) {
   const sourceRef = useRef<HTMLVideoElement>(null);
   const outputRef = useRef<HTMLVideoElement>(null);
   const [split, setSplit] = useState(52);
@@ -72,6 +73,15 @@ export function ComparisonViewer({ job }: Props) {
             >
               Download master
             </a>
+          ) : null}
+          {onContinue ? (
+            <button
+              type="button"
+              onClick={onContinue}
+              className="rounded-full border border-[var(--gold)] px-4 py-2 text-xs uppercase tracking-[0.16em] text-[var(--gold)]"
+            >
+              Enhance this master
+            </button>
           ) : null}
         </div>
       </div>

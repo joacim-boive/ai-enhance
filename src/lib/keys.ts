@@ -46,6 +46,36 @@ export function jobPrefix(userId: string): string {
   return `users/${assertSafeId(userId, "user")}/jobs/`;
 }
 
+export function jobObjectsPrefix(userId: string, jobId: string): string {
+  return `users/${assertSafeId(userId, "user")}/jobs/${assertSafeId(jobId, "job")}/`;
+}
+
+export function clipRecordKey(userId: string, clipId: string): string {
+  return `users/${assertSafeId(userId, "user")}/clips/${assertSafeId(clipId, "clip")}.json`;
+}
+
+export function clipPointerKey(clipId: string): string {
+  return `clips/${assertSafeId(clipId, "clip")}.json`;
+}
+
+export function clipPrefix(userId: string): string {
+  return `users/${assertSafeId(userId, "user")}/clips/`;
+}
+
+export function parseClipIdFromRecordKey(objectKey: string): string | null {
+  const match = /\/clips\/([0-9a-f-]{36})\.json$/i.exec(objectKey);
+  return match?.[1] ?? null;
+}
+
+export function uploadPrefix(userId: string): string {
+  return `users/${assertSafeId(userId, "user")}/uploads/`;
+}
+
+export function parseFileIdFromUploadKey(value: string): string | null {
+  const match = /(?:^|\/)uploads\/([0-9a-f-]{36})(?:\.|\/|$)/i.exec(value);
+  return match?.[1] ?? null;
+}
+
 export function jobPointerKey(jobId: string): string {
   return `jobs/${assertSafeId(jobId, "job")}.json`;
 }

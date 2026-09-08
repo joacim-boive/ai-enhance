@@ -2,9 +2,10 @@
 
 import { useEffect, useRef, useState } from "react";
 import { uploadBrowserFile } from "@/lib/browser-upload";
+import { benchFromClip } from "@/lib/library-tree";
 import { readJsonResponse } from "@/lib/http";
-import { DEFAULT_SETTINGS } from "@/lib/settings";
-import type { HealthStatus, JobSettings, PublicJob, SourceTransfer, Toast, VideoMeta } from "@/lib/types";
+import { DEFAULT_SETTINGS, treatmentLabel } from "@/lib/settings";
+import type { BenchSource, HealthStatus, JobSettings, PublicClip, PublicJob, SourceTransfer, Toast } from "@/lib/types";
 import { AppHeader } from "./app-header";
 import { ComparisonViewer } from "./comparison-viewer";
 import { DropZone } from "./drop-zone";
@@ -13,17 +14,18 @@ import { JobRail } from "./job-rail";
 import { SourceStage } from "./source-stage";
 import { ToastViewport } from "./toast-viewport";
 
-type UploadedFile = {
+type IngestedFile = {
   id: string;
+  clipId?: string;
   name: string;
   url: string;
-  meta: VideoMeta;
+  meta: BenchSource["meta"];
   thumbs: string[];
 };
 
 export function StudioApp() {
   const [health, setHealth] = useState<HealthStatus | null>(null);
-  const [file, setFile] = useState<UploadedFile | null>(null);
+  const [file, setFile] = useState<BenchSource | null>(null);
   const [settings, setSettings] = useState<JobSettings>(DEFAULT_SETTINGS);
   const [job, setJob] = useState<PublicJob | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -34,6 +36,10 @@ export function StudioApp() {
 
   useEffect(() => {
     void refreshHealth();
+    const clipId = new URLSearchParams(window.location.search).get("clip");
+    if (clipId) {
+      void loadClipOntoBench(clipId).catch(() => undefined);
+    }
     const timer = setInterval(() => {
       void refreshHealth();
     }, 20000);
@@ -76,8 +82,8 @@ export function StudioApp() {
         tone: "success",
         title: "Master is ready",
         body: job.fallbackReason
-          ? "Finished on the fallback engine. Preview the split and download."
-          : "Preview the split view and download the enhanced master.",
+          ? "Finished on the fallback engine. It’s in the library — try another treatment or continue from this master."
+          : "It’s in the library. Try another treatment on this original, or enhance the master next.",
       });
       notifyBrowser("Enhance complete", job.name);
     }
@@ -149,7 +155,7 @@ export function StudioApp() {
     });
     try {
       const latest = health ?? (await fetchHealth());
-      let data: UploadedFile;
+      let data: IngestedFile;
       if (latest?.r2?.configured) {
         data = await uploadViaR2(input, setTransfer);
       } else if (latest?.hosting === "vercel") {
@@ -159,7 +165,7 @@ export function StudioApp() {
       } else {
         data = await uploadViaForm(input);
       }
-      setFile(data);
+      setFile(benchFromIngest(data));
       pushToast({
         tone: "success",
         title: "Clip is on the bench",
@@ -198,11 +204,11 @@ export function StudioApp() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url }),
       });
-      const data = await readJsonResponse<UploadedFile & { error?: string }>(response);
+      const data = await readJsonResponse<IngestedFile & { error?: string }>(response);
       if (!response.ok) {
         throw new Error(data.error || "Drive import failed");
       }
-      setFile(data);
+      setFile(benchFromIngest(data));
       pushToast({
         tone: "success",
         title: "Clip is on the bench",
@@ -231,11 +237,11 @@ export function StudioApp() {
     });
     try {
       const response = await fetch("/api/sample", { method: "POST" });
-      const data = await readJsonResponse<UploadedFile & { error?: string }>(response);
+      const data = await readJsonResponse<IngestedFile & { error?: string }>(response);
       if (!response.ok) {
         throw new Error(data.error || "Sample failed");
       }
-      setFile(data);
+      setFile(benchFromIngest(data));
       pushToast({
         tone: "info",
         title: "Loaded a 24 fps sample",
@@ -270,7 +276,8 @@ export function StudioApp() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          fileId: file.id,
+          clipId: file.clipId,
+          fileId: file.fileId ?? file.id,
           name: file.name,
           settings: jobSettings,
         }),
@@ -315,6 +322,50 @@ export function StudioApp() {
     if (data.job) {
       setJob(data.job);
     }
+  }
+
+  async function loadClipOntoBench(clipId: string) {
+    const response = await fetch(`/api/clips/${clipId}`, { cache: "no-store" });
+    const data = await readJsonResponse<{ clip?: PublicClip; error?: string }>(response);
+    if (!response.ok || !data.clip) {
+      throw new Error(data.error || "Could not open that clip");
+    }
+    const bench = benchFromClip(data.clip);
+    if (!bench) {
+      throw new Error("That clip is missing video stats. Try probing it again from an upload.");
+    }
+    setFile(bench);
+    setJob(null);
+  }
+
+  async function continueFromMaster() {
+    if (!job?.outputUrl || !job.outputMeta) {
+      return;
+    }
+    if (job.outputClipId) {
+      try {
+        await loadClipOntoBench(job.outputClipId);
+        sourceRef.current = null;
+        return;
+      } catch {
+        // Fall through to a local bench from the finished job.
+      }
+    }
+    setFile({
+      id: job.outputClipId ?? job.id,
+      clipId: job.outputClipId ?? job.id,
+      fileId: file?.fileId ?? null,
+      name: job.name,
+      url: job.outputUrl,
+      meta: job.outputMeta,
+      thumbs: job.thumbs,
+      kind: "version",
+      treatment: treatmentLabel(job.settings),
+      parentClipId: job.sourceClipId ?? file?.clipId ?? null,
+      rootClipId: file?.rootClipId ?? job.sourceClipId ?? job.id,
+    });
+    setJob(null);
+    sourceRef.current = null;
   }
 
   const working =
@@ -369,13 +420,32 @@ export function StudioApp() {
         />
       </div>
       {job ? <JobRail job={job} onCancel={() => void cancel()} onRetry={() => void retry()} /> : null}
-      {job?.status === "complete" && job.outputUrl ? <ComparisonViewer job={job} /> : null}
+      {job?.status === "complete" && job.outputUrl ? (
+        <ComparisonViewer job={job} onContinue={() => void continueFromMaster()} />
+      ) : null}
       <ToastViewport
         toasts={toasts}
         onDismiss={(id) => setToasts((current) => current.filter((item) => item.id !== id))}
       />
     </div>
   );
+}
+
+function benchFromIngest(data: IngestedFile): BenchSource {
+  const clipId = data.clipId ?? data.id;
+  return {
+    id: data.id,
+    clipId,
+    fileId: data.id,
+    name: data.name,
+    url: data.url,
+    meta: data.meta,
+    thumbs: data.thumbs,
+    kind: "original",
+    treatment: null,
+    parentClipId: null,
+    rootClipId: clipId,
+  };
 }
 
 function notifyBrowser(title: string, body: string) {
@@ -418,7 +488,7 @@ function settingsForHealth(settings: JobSettings, health: HealthStatus | null): 
 async function uploadViaR2(
   input: File,
   onTransfer: (transfer: SourceTransfer) => void,
-): Promise<UploadedFile> {
+): Promise<IngestedFile> {
   onTransfer({
     phase: "preparing",
     name: input.name,
@@ -486,18 +556,18 @@ async function uploadViaR2(
       parts: uploaded.parts,
     }),
   });
-  const data = await readJsonResponse<UploadedFile & { error?: string }>(response);
+  const data = await readJsonResponse<IngestedFile & { error?: string }>(response);
   if (!response.ok) {
     throw new Error(data.error || "Could not probe that clip");
   }
   return data;
 }
 
-async function uploadViaForm(input: File): Promise<UploadedFile> {
+async function uploadViaForm(input: File): Promise<IngestedFile> {
   const body = new FormData();
   body.append("file", input);
   const response = await fetch("/api/upload", { method: "POST", body });
-  const data = await readJsonResponse<UploadedFile & { error?: string }>(response);
+  const data = await readJsonResponse<IngestedFile & { error?: string }>(response);
   if (!response.ok) {
     throw new Error(data.error || "Upload failed");
   }

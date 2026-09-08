@@ -10,6 +10,7 @@ import {
   patchJob,
 } from "./jobs";
 import { jobOutputKey, mediaJobUrl } from "./keys";
+import { createVersionClipFromJob, loadClip } from "./clips";
 import { extractThumbnails, probeVideo } from "./probe";
 import {
   abortMultipartUpload,
@@ -503,10 +504,26 @@ async function completeJob(
   });
   await appendEvent(id, {
     stage: "Ready",
-    message: message ?? "Master is ready to preview and download.",
+    message: message ?? "Master is ready to preview and download. It’s saved in your library.",
     progress: 100,
     level: "success",
   });
+  if (!options?.reuseSource) {
+    const latest = await loadJob(id);
+    if (latest?.sourceClipId && latest.outputUrl) {
+      const parent = await loadClip(latest.sourceClipId);
+      if (parent) {
+        try {
+          const version = await createVersionClipFromJob(latest, parent);
+          if (latest.outputClipId !== version.id) {
+            await patchJob(id, { outputClipId: version.id });
+          }
+        } catch (error) {
+          console.error(`Could not record library version for ${id}`, error);
+        }
+      }
+    }
+  }
   clearAbortController(id);
 }
 
