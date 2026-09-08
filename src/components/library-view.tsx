@@ -24,7 +24,6 @@ export function LibraryView() {
   const [confirm, setConfirm] = useState<PublicClip | null>(null);
 
   async function refresh() {
-    await fetch("/api/session", { method: "POST", cache: "no-store" }).catch(() => undefined);
     const response = await fetch("/api/library", { cache: "no-store" });
     if (!response.ok) {
       throw new Error("Could not load the library.");

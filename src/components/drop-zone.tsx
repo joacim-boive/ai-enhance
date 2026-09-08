@@ -81,7 +81,7 @@ export function DropZone({ disabled, transfer, onFile, onSample, onDriveUrl }: P
           onDriveUrl(uri);
         }
       }}
-      className={`panel relative flex min-h-[360px] flex-col items-center justify-center overflow-hidden rounded-[28px] px-8 py-12 text-center transition ${
+      className={`panel relative flex min-h-[280px] w-full min-w-0 flex-col items-center justify-center overflow-hidden rounded-[28px] px-5 py-10 text-center transition sm:min-h-[360px] sm:px-8 sm:py-12 ${
         hot ? "border-[var(--gold)]" : ""
       } ${disabled && !transfer ? "opacity-60" : ""}`}
     >

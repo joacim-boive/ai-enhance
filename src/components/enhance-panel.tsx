@@ -47,7 +47,7 @@ export function EnhancePanel({
   ];
 
   return (
-    <aside className="panel flex h-full flex-col rounded-[28px] p-6">
+    <aside className="panel flex h-full min-w-0 flex-col overflow-hidden rounded-[28px] p-6">
       <p className="text-xs uppercase tracking-[0.22em] text-[var(--muted)]">Enhance</p>
       <h2 className="mt-2 font-serif text-3xl tracking-tight">Choose a treatment</h2>
       <div className="mt-6 grid gap-2">
