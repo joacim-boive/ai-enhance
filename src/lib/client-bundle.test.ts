@@ -39,3 +39,11 @@ test("the browser never imports the AWS S3 SDK", () => {
     );
   }
 });
+
+test("the upload token route does not statically import R2 or jobs", () => {
+  const source = readFileSync(path.join("src", "app", "api", "upload", "token", "route.ts"), "utf8");
+  assert.equal(/from\s+["']@\/lib\/r2["']/.test(source), false, "static @/lib/r2 import");
+  assert.equal(/from\s+["']@\/lib\/authz["']/.test(source), false, "static @/lib/authz import");
+  assert.equal(/from\s+["']@\/lib\/jobs["']/.test(source), false, "static @/lib/jobs import");
+  assert.equal(/from\s+["']@aws-sdk/.test(source), false, "static @aws-sdk import");
+});

@@ -2,8 +2,9 @@
 
 import { useEffect, useRef, useState } from "react";
 import { uploadBrowserFile } from "@/lib/browser-upload";
+import { readJsonResponse } from "@/lib/http";
 import { DEFAULT_SETTINGS } from "@/lib/settings";
-import type { HealthStatus, JobSettings, PublicJob, Toast, VideoMeta } from "@/lib/types";
+import type { HealthStatus, JobSettings, PublicJob, SourceTransfer, Toast, VideoMeta } from "@/lib/types";
 import { AppHeader } from "./app-header";
 import { ComparisonViewer } from "./comparison-viewer";
 import { DropZone } from "./drop-zone";
@@ -26,6 +27,7 @@ export function StudioApp() {
   const [settings, setSettings] = useState<JobSettings>(DEFAULT_SETTINGS);
   const [job, setJob] = useState<PublicJob | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [transfer, setTransfer] = useState<SourceTransfer | null>(null);
   const [starting, setStarting] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const sourceRef = useRef<PublicJob["status"] | null>(null);
@@ -107,7 +109,7 @@ export function StudioApp() {
       if (!response.ok) {
         return;
       }
-      const data = (await response.json()) as { job: PublicJob };
+      const data = await readJsonResponse<{ job: PublicJob }>(response);
       setJob(data.job);
       if (
         repeat &&
@@ -139,11 +141,17 @@ export function StudioApp() {
   async function uploadFile(input: File) {
     setUploading(true);
     setJob(null);
+    setTransfer({
+      phase: "preparing",
+      name: input.name,
+      loaded: 0,
+      total: input.size,
+    });
     try {
       const latest = health ?? (await fetchHealth());
       let data: UploadedFile;
       if (latest?.r2?.configured) {
-        data = await uploadViaR2(input);
+        data = await uploadViaR2(input, setTransfer);
       } else if (latest?.hosting === "vercel") {
         throw new Error(
           "Add Cloudflare R2 credentials so clips upload privately and never pass through Vercel as a Buffer.",
@@ -165,15 +173,65 @@ export function StudioApp() {
       });
     } finally {
       setUploading(false);
+      setTransfer(null);
+    }
+  }
+
+  async function importDrive(url: string) {
+    setUploading(true);
+    setJob(null);
+    setTransfer({
+      phase: "importing",
+      name: "Google Drive",
+      loaded: 0,
+      total: 0,
+    });
+    try {
+      const latest = health ?? (await fetchHealth());
+      if (latest?.hosting === "vercel" && !latest.r2?.configured) {
+        throw new Error(
+          "Add Cloudflare R2 credentials so Drive imports land in private storage.",
+        );
+      }
+      const response = await fetch("/api/ingest/drive", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url }),
+      });
+      const data = await readJsonResponse<UploadedFile & { error?: string }>(response);
+      if (!response.ok) {
+        throw new Error(data.error || "Drive import failed");
+      }
+      setFile(data);
+      pushToast({
+        tone: "success",
+        title: "Clip is on the bench",
+        body: `${data.meta.width}×${data.meta.height} at ${Math.round(data.meta.fps)} fps.`,
+      });
+    } catch (error) {
+      pushToast({
+        tone: "error",
+        title: "Could not import from Drive",
+        body: error instanceof Error ? error.message : "Share the file as Anyone with the link.",
+      });
+    } finally {
+      setUploading(false);
+      setTransfer(null);
     }
   }
 
   async function loadSample() {
     setUploading(true);
     setJob(null);
+    setTransfer({
+      phase: "probing",
+      name: "24 fps sample",
+      loaded: 0,
+      total: 0,
+    });
     try {
       const response = await fetch("/api/sample", { method: "POST" });
-      const data = (await response.json()) as UploadedFile & { error?: string };
+      const data = await readJsonResponse<UploadedFile & { error?: string }>(response);
       if (!response.ok) {
         throw new Error(data.error || "Sample failed");
       }
@@ -191,6 +249,7 @@ export function StudioApp() {
       });
     } finally {
       setUploading(false);
+      setTransfer(null);
     }
   }
 
@@ -216,7 +275,7 @@ export function StudioApp() {
           settings: jobSettings,
         }),
       });
-      const data = (await response.json()) as { job?: PublicJob; error?: string };
+      const data = await readJsonResponse<{ job?: PublicJob; error?: string }>(response);
       if (!response.ok || !data.job) {
         throw new Error(data.error || "Could not start the job");
       }
@@ -252,7 +311,7 @@ export function StudioApp() {
       return;
     }
     const response = await fetch(`/api/jobs/${job.id}/retry`, { method: "POST" });
-    const data = (await response.json()) as { job?: PublicJob };
+    const data = await readJsonResponse<{ job?: PublicJob }>(response);
     if (data.job) {
       setJob(data.job);
     }
@@ -289,7 +348,13 @@ export function StudioApp() {
               }}
             />
           ) : (
-            <DropZone disabled={uploading} onFile={(item) => void uploadFile(item)} onSample={() => void loadSample()} />
+            <DropZone
+              disabled={uploading}
+              transfer={transfer}
+              onFile={(item) => void uploadFile(item)}
+              onSample={() => void loadSample()}
+              onDriveUrl={(url) => void importDrive(url)}
+            />
           )}
         </div>
         <EnhancePanel
@@ -297,6 +362,7 @@ export function StudioApp() {
           meta={file?.meta ?? null}
           health={health}
           working={working}
+          workingLabel={uploading ? "Uploading…" : "Working…"}
           canEnhance={Boolean(file) && !working}
           onChange={setSettings}
           onEnhance={() => void enhance()}
@@ -332,7 +398,7 @@ function notifyBrowser(title: string, body: string) {
 async function fetchHealth(): Promise<HealthStatus | null> {
   try {
     const response = await fetch("/api/health", { cache: "no-store" });
-    return (await response.json()) as HealthStatus;
+    return await readJsonResponse<HealthStatus>(response);
   } catch {
     return null;
   }
@@ -349,7 +415,16 @@ function settingsForHealth(settings: JobSettings, health: HealthStatus | null): 
   return settings;
 }
 
-async function uploadViaR2(input: File): Promise<UploadedFile> {
+async function uploadViaR2(
+  input: File,
+  onTransfer: (transfer: SourceTransfer) => void,
+): Promise<UploadedFile> {
+  onTransfer({
+    phase: "preparing",
+    name: input.name,
+    loaded: 0,
+    total: input.size,
+  });
   const tokenResponse = await fetch("/api/upload/token", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -359,7 +434,7 @@ async function uploadViaR2(input: File): Promise<UploadedFile> {
       contentType: input.type || "video/mp4",
     }),
   });
-  const token = (await tokenResponse.json()) as {
+  const token = await readJsonResponse<{
     fileId?: string;
     objectKey?: string;
     contentType?: string;
@@ -370,15 +445,35 @@ async function uploadViaR2(input: File): Promise<UploadedFile> {
       partUrls: string[];
     } | null;
     error?: string;
-  };
+  }>(tokenResponse);
   if (!tokenResponse.ok || !token.fileId || !token.objectKey || !token.putUrl) {
     throw new Error(token.error || "Could not mint a private upload URL");
   }
+  onTransfer({
+    phase: "uploading",
+    name: input.name,
+    loaded: 0,
+    total: input.size,
+  });
   const uploaded = await uploadBrowserFile({
     file: input,
     contentType: token.contentType || input.type || "video/mp4",
     putUrl: token.putUrl,
     multipart: token.multipart ?? null,
+    onProgress: (progress) => {
+      onTransfer({
+        phase: "uploading",
+        name: input.name,
+        loaded: progress.loaded,
+        total: progress.total || input.size,
+      });
+    },
+  });
+  onTransfer({
+    phase: "probing",
+    name: input.name,
+    loaded: input.size,
+    total: input.size,
   });
   const response = await fetch("/api/ingest", {
     method: "POST",
@@ -391,7 +486,7 @@ async function uploadViaR2(input: File): Promise<UploadedFile> {
       parts: uploaded.parts,
     }),
   });
-  const data = (await response.json()) as UploadedFile & { error?: string };
+  const data = await readJsonResponse<UploadedFile & { error?: string }>(response);
   if (!response.ok) {
     throw new Error(data.error || "Could not probe that clip");
   }
@@ -402,7 +497,7 @@ async function uploadViaForm(input: File): Promise<UploadedFile> {
   const body = new FormData();
   body.append("file", input);
   const response = await fetch("/api/upload", { method: "POST", body });
-  const data = (await response.json()) as UploadedFile & { error?: string };
+  const data = await readJsonResponse<UploadedFile & { error?: string }>(response);
   if (!response.ok) {
     throw new Error(data.error || "Upload failed");
   }

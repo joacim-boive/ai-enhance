@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/authz";
 import { ingestR2Video } from "@/lib/ingest";
+import { errorMessageFromUnknown } from "@/lib/http";
 import { ownsObjectKey } from "@/lib/keys";
 import { missingR2Message, r2Enabled } from "@/lib/env";
 
@@ -17,21 +18,21 @@ type IngestBody = {
 };
 
 export async function POST(request: Request): Promise<Response> {
-  if (!r2Enabled()) {
-    return NextResponse.json({ error: missingR2Message() }, { status: 503 });
-  }
-  const session = await requireSession();
-  const body = (await request.json()) as IngestBody;
-  if (!body.id || !body.name || !body.objectKey) {
-    return NextResponse.json({ error: "Missing upload metadata" }, { status: 400 });
-  }
-  if (!ownsObjectKey(session.userId, body.objectKey)) {
-    return NextResponse.json({ error: "Invalid upload path" }, { status: 403 });
-  }
-  if (!body.objectKey.includes(`/uploads/${body.id}`)) {
-    return NextResponse.json({ error: "Upload id does not match the object key" }, { status: 400 });
-  }
   try {
+    if (!r2Enabled()) {
+      return NextResponse.json({ error: missingR2Message() }, { status: 503 });
+    }
+    const session = await requireSession();
+    const body = (await request.json()) as IngestBody;
+    if (!body.id || !body.name || !body.objectKey) {
+      return NextResponse.json({ error: "Missing upload metadata" }, { status: 400 });
+    }
+    if (!ownsObjectKey(session.userId, body.objectKey)) {
+      return NextResponse.json({ error: "Invalid upload path" }, { status: 403 });
+    }
+    if (!body.objectKey.includes(`/uploads/${body.id}`)) {
+      return NextResponse.json({ error: "Upload id does not match the object key" }, { status: 400 });
+    }
     const ingested = await ingestR2Video({
       id: body.id,
       name: body.name,
@@ -42,10 +43,10 @@ export async function POST(request: Request): Promise<Response> {
     });
     return NextResponse.json(ingested);
   } catch (error) {
-    const message =
-      error instanceof Error
-        ? error.message
-        : "Could not read that video. Try exporting it as H.264 MP4.";
+    const message = errorMessageFromUnknown(
+      error,
+      "Could not read that video. Try exporting it as H.264 MP4.",
+    );
     return NextResponse.json({ error: message }, { status: 422 });
   }
 }

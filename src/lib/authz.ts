@@ -1,4 +1,3 @@
-import { loadJob } from "./jobs";
 import { getRequestSession, sessionFromRequest, type Session } from "./session";
 import type { Job } from "./types";
 
@@ -8,6 +7,7 @@ export async function requireSession(): Promise<Session> {
 
 export async function requireOwnedJob(id: string): Promise<Job | null> {
   const session = await getRequestSession();
+  const { loadJob } = await import("./jobs");
   const job = await loadJob(id);
   if (!job || job.userId !== session.userId) {
     return null;

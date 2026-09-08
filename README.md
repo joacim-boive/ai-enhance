@@ -6,7 +6,7 @@ Production host: [ai-enhance-ruby.vercel.app](https://ai-enhance-ruby.vercel.app
 
 ## What v1 does
 
-- Drop an MP4 / MOV / WebM / MKV (including multi-GB masters), or try a 24 fps sample
+- Drop an MP4 / MOV / WebM / MKV (including multi-GB masters), paste a Google Drive file link, or try a 24 fps sample
 - Presets: Restore (2×), Cinema 4K, High Frame Rate (60 fps), Max (4K + 60)
 - Custom scale, target fps, denoise, and sharpen
 - Live job timeline, ETA, toasts, and a before/after split when the master is ready
@@ -15,6 +15,8 @@ Production host: [ai-enhance-ruby.vercel.app](https://ai-enhance-ruby.vercel.app
 - Cancel and retry without leaving the bench
 
 Masters are **private**. The object key is `users/{userId}/jobs/{jobId}/output.mp4`. Playback and download go through `/api/media`, which checks the session cookie and 302s to a short-lived SigV4 GET. Guessing a key is not enough. There is no public `*.r2.dev` URL, no base64 payload, and the file is never pulled through a Next.js function as a `Buffer`.
+
+Google Drive file links (Anyone with the link can view) are pulled server-side and streamed into that same private R2 prefix. Folders are rejected. Very large Drive files can hit the function time limit — drop those from disk instead.
 
 ## Vercel
 
@@ -33,6 +35,20 @@ SESSION_SECRET=...
 ```
 
 Optional: `R2_JURISDICTION=eu` if the bucket uses a jurisdiction endpoint.
+
+The R2 API token only needs **Object Read & Write** on that bucket. Browser uploads PUT straight to a presigned URL, so the bucket also needs CORS. If the token cannot call `PutBucketCors`, add this rule in R2 → bucket → Settings → CORS:
+
+```json
+[
+  {
+    "AllowedOrigins": ["*"],
+    "AllowedMethods": ["GET", "PUT", "HEAD"],
+    "AllowedHeaders": ["*"],
+    "ExposeHeaders": ["ETag", "Content-Length", "Content-Type"],
+    "MaxAgeSeconds": 3600
+  }
+]
+```
 
 The header shows **GPU unset** when that deployment cannot read `RUNPOD_API_KEY`, and **R2 unset** when private storage is missing. Adding variables only to Production leaves Preview unset. After changing env vars, Vercel does not patch a live deployment — create a new one.
 
