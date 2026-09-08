@@ -1,7 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { formatBytes, formatDate, formatDuration, formatFps, formatResolution } from "@/lib/format";
+import {
+  aspectRatioForMeta,
+  formatBytes,
+  formatDate,
+  formatDuration,
+  formatFps,
+  formatResolution,
+} from "@/lib/format";
 import { historyEntries, latestVersion, versionCount } from "@/lib/library-tree";
 import type { LibraryFamily, PublicClip } from "@/lib/types";
 import { ClipReview } from "./clip-review";
@@ -165,12 +172,14 @@ export function LibraryView() {
           then 4K, then both, without uploading again.
         </p>
       ) : !selectedFamily ? (
-        <ul className="mt-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        <ul className="mt-8 grid items-start gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {families.map((family) => (
             <FamilyCard
               key={family.root.id}
               family={family}
               onOpen={() => openFamily(family)}
+              onDelete={setConfirm}
+              deleting={deleting && confirm?.id === family.root.id}
             />
           ))}
         </ul>
@@ -218,80 +227,175 @@ export function LibraryView() {
   );
 }
 
-function FamilyCard({
-  family,
-  onOpen,
-}: {
+type FamilyCardProps = {
   family: LibraryFamily;
   onOpen: () => void;
-}) {
+  onDelete: (clip: PublicClip) => void;
+  deleting: boolean;
+};
+
+function FamilyCard({ family, onOpen, onDelete, deleting }: FamilyCardProps) {
+  const [isHovered, setIsHovered] = useState(false);
+  const [calculatedRatio, setCalculatedRatio] = useState<string | null>(null);
   const preview = latestVersion(family);
   const versions = versionCount(family);
   const meta = preview.meta ?? family.root.meta;
+  const thumbnail =
+    (preview.thumbs && preview.thumbs.length > 0 && preview.thumbs[0])
+      ? preview.thumbs[0]
+      : (family.root.thumbs && family.root.thumbs.length > 0 && family.root.thumbs[0])
+        ? family.root.thumbs[0]
+        : null;
   const working = family.jobs.some((job) =>
     ["queued", "probing", "warming", "processing", "encoding"].includes(job.status),
   );
 
+  const effectiveRatio = useMemo(() => {
+    return aspectRatioForMeta(meta, calculatedRatio ?? "16 / 9");
+  }, [meta, calculatedRatio]);
+
   return (
-    <li>
-      <button
-        type="button"
+    <li className="panel group relative flex flex-col w-full overflow-hidden rounded-[24px] text-left transition hover:border-[var(--line-strong)]">
+      <div
+        role="button"
+        tabIndex={0}
+        aria-label={`Open ${family.root.name}`}
+        className="relative flex w-full cursor-pointer items-center justify-center overflow-hidden bg-black/80 focus:outline-none focus:ring-1 focus:ring-[var(--gold)]"
+        style={{ aspectRatio: effectiveRatio }}
+        onMouseEnter={() => setIsHovered(true)}
+        onMouseLeave={() => setIsHovered(false)}
         onClick={onOpen}
-        className="panel group w-full overflow-hidden rounded-[24px] text-left transition hover:border-[var(--line-strong)]"
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            onOpen();
+          }
+        }}
       >
-        <div className="relative aspect-video bg-black">
-          {preview.url ? (
-            <video
-              src={preview.url}
-              poster={preview.thumbs[0] ?? family.root.thumbs[0]}
-              muted
-              playsInline
-              preload="metadata"
-              className="h-full w-full object-cover"
-              onMouseEnter={(event) => {
-                void event.currentTarget.play().catch(() => undefined);
-              }}
-              onMouseLeave={(event) => {
-                event.currentTarget.pause();
-                event.currentTarget.currentTime = 0;
-              }}
-            />
-          ) : preview.thumbs[0] ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={preview.thumbs[0]} alt="" className="h-full w-full object-cover" />
-          ) : null}
-          <div className="absolute left-3 top-3 flex gap-2">
-            {versions > 0 ? (
-              <span className="rounded-full bg-black/70 px-3 py-1 font-mono text-[10px] uppercase tracking-[0.16em] text-[var(--gold)]">
-                {versions} version{versions === 1 ? "" : "s"}
-              </span>
-            ) : (
-              <span className="rounded-full bg-black/70 px-3 py-1 font-mono text-[10px] uppercase tracking-[0.16em] text-[var(--muted)]">
-                Original
-              </span>
-            )}
-            {working ? (
-              <span className="rounded-full bg-black/70 px-3 py-1 font-mono text-[10px] uppercase tracking-[0.16em] text-[var(--teal)]">
-                Working
-              </span>
-            ) : null}
+        {thumbnail ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={thumbnail}
+            alt={family.root.name}
+            loading="lazy"
+            className="h-full w-full object-contain"
+            onLoad={(event) => {
+              const img = event.currentTarget;
+              if (!meta?.width && img.naturalWidth && img.naturalHeight) {
+                setCalculatedRatio(`${img.naturalWidth} / ${img.naturalHeight}`);
+              }
+            }}
+          />
+        ) : null}
+
+        {isHovered && preview.url ? (
+          <video
+            src={preview.url}
+            poster={thumbnail ?? undefined}
+            autoPlay
+            muted
+            loop
+            playsInline
+            className={`h-full w-full object-contain ${thumbnail ? "absolute inset-0" : ""}`}
+            onLoadedMetadata={(event) => {
+              const video = event.currentTarget;
+              if (!meta?.width && video.videoWidth && video.videoHeight) {
+                setCalculatedRatio(`${video.videoWidth} / ${video.videoHeight}`);
+              }
+            }}
+          />
+        ) : !thumbnail && preview.url ? (
+          <video
+            src={preview.url}
+            muted
+            playsInline
+            preload="metadata"
+            className="h-full w-full object-contain"
+            onLoadedMetadata={(event) => {
+              const video = event.currentTarget;
+              if (!meta?.width && video.videoWidth && video.videoHeight) {
+                setCalculatedRatio(`${video.videoWidth} / ${video.videoHeight}`);
+              }
+            }}
+          />
+        ) : !thumbnail && !preview.url ? (
+          <div className="flex h-full w-full items-center justify-center text-[var(--muted)]">
+            <span className="font-mono text-xs uppercase tracking-[0.16em]">No preview</span>
           </div>
-        </div>
-        <div className="px-5 py-4">
-          <p className="text-sm">{family.root.name}</p>
-          <p className="mt-1 font-mono text-[11px] uppercase tracking-[0.14em] text-[var(--muted)]">
-            {formatDate(family.root.createdAt)}
-            {meta
-              ? ` · ${formatResolution(meta.width, meta.height)} · ${formatFps(meta.fps)} · ${formatDuration(meta.durationSec)} · ${formatBytes(meta.sizeBytes)}`
-              : ""}
-          </p>
-          {preview.kind === "version" ? (
-            <p className="mt-2 text-xs text-[var(--gold)]">Latest · {preview.treatment}</p>
+        ) : null}
+
+        <div className="pointer-events-none absolute left-3 top-3 flex gap-2">
+          {versions > 0 ? (
+            <span className="rounded-full bg-black/70 px-3 py-1 font-mono text-[10px] uppercase tracking-[0.16em] text-[var(--gold)]">
+              {versions} version{versions === 1 ? "" : "s"}
+            </span>
           ) : (
-            <p className="mt-2 text-xs text-[var(--muted)]">Ready for another treatment</p>
+            <span className="rounded-full bg-black/70 px-3 py-1 font-mono text-[10px] uppercase tracking-[0.16em] text-[var(--muted)]">
+              Original
+            </span>
           )}
+          {working ? (
+            <span className="rounded-full bg-black/70 px-3 py-1 font-mono text-[10px] uppercase tracking-[0.16em] text-[var(--teal)]">
+              Working
+            </span>
+          ) : null}
         </div>
-      </button>
+
+        <button
+          type="button"
+          aria-label={`Delete ${family.root.name}`}
+          title="Delete video"
+          disabled={deleting}
+          onClick={(event) => {
+            event.stopPropagation();
+            onDelete(family.root);
+          }}
+          onKeyDown={(event) => {
+            event.stopPropagation();
+          }}
+          className="absolute right-3 top-3 z-10 flex h-7 items-center gap-1.5 rounded-full bg-black/75 px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.16em] text-[var(--muted)] backdrop-blur-sm transition hover:bg-[var(--err)] hover:text-white focus:outline-none focus:ring-1 focus:ring-[var(--err)] disabled:opacity-40"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 20 20"
+            fill="currentColor"
+            className="h-3.5 w-3.5"
+            aria-hidden="true"
+          >
+            <path
+              fillRule="evenodd"
+              d="M8.75 1A2.75 2.75 0 006 3.75v.443c-.795.077-1.584.176-2.365.298a.75.75 0 10.23 1.482l.149-.022.841 10.518A2.75 2.75 0 007.596 19h4.807a2.75 2.75 0 002.742-2.53l.841-10.52.149.023a.75.75 0 00.23-1.482A41.03 41.03 0 0014 4.193V3.75A2.75 2.75 0 0011.25 1h-2.5zM10 4c.84 0 1.673.025 2.5.075V3.75c0-.69-.56-1.25-1.25-1.25h-2.5c-.69 0-1.25.56-1.25 1.25v.325C8.327 4.025 9.16 4 10 4zM8.58 7.72a.75.75 0 00-1.5.06l.3 7.5a.75.75 0 101.5-.06l-.3-7.5zm4.34.06a.75.75 0 10-1.5-.06l-.3 7.5a.75.75 0 101.5.06l.3-7.5z"
+              clipRule="evenodd"
+            />
+          </svg>
+          <span>{deleting ? "Deleting…" : "Delete"}</span>
+        </button>
+      </div>
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={onOpen}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            onOpen();
+          }
+        }}
+        className="cursor-pointer px-5 py-4 focus:outline-none"
+      >
+        <p className="text-sm">{family.root.name}</p>
+        <p className="mt-1 font-mono text-[11px] uppercase tracking-[0.14em] text-[var(--muted)]">
+          {formatDate(family.root.createdAt)}
+          {meta
+            ? ` · ${formatResolution(meta.width, meta.height)} · ${formatFps(meta.fps)} · ${formatDuration(meta.durationSec)} · ${formatBytes(meta.sizeBytes)}`
+            : ""}
+        </p>
+        {preview.kind === "version" ? (
+          <p className="mt-2 text-xs text-[var(--gold)]">Latest · {preview.treatment}</p>
+        ) : (
+          <p className="mt-2 text-xs text-[var(--muted)]">Ready for another treatment</p>
+        )}
+      </div>
     </li>
   );
 }

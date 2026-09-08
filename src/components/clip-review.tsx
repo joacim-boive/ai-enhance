@@ -2,7 +2,13 @@
 
 import Link from "next/link";
 import { childEntries, type HistoryEntry } from "@/lib/library-tree";
-import { formatBytes, formatDuration, formatFps, formatResolution } from "@/lib/format";
+import {
+  aspectRatioForMeta,
+  formatBytes,
+  formatDuration,
+  formatFps,
+  formatResolution,
+} from "@/lib/format";
 import { engineLabel } from "@/lib/settings";
 import type { LibraryFamily, PublicClip } from "@/lib/types";
 import { ClipStats, downloadHrefFor, downloadNameFor } from "./clip-stats";
@@ -30,6 +36,7 @@ export function ClipReview({
   onClose,
 }: Props) {
   const meta = selected.meta;
+  const aspect = aspectRatioForMeta(selected.meta);
   const roots = childEntries(history, null).length
     ? childEntries(history, null)
     : history.filter((entry) => entry.id === family.root.id);
@@ -52,7 +59,10 @@ export function ClipReview({
             All clips
           </button>
         </div>
-        <div className="aspect-video bg-black">
+        <div
+          className="relative flex max-h-[75vh] w-full items-center justify-center overflow-hidden bg-black"
+          style={{ aspectRatio: aspect }}
+        >
           <video
             key={selected.id}
             src={selected.url}

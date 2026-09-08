@@ -38,6 +38,22 @@ export function formatResolution(width: number, height: number): string {
   return `${width}×${height}`;
 }
 
+export function aspectRatioForMeta(
+  meta: { width?: number; height?: number } | null | undefined,
+  fallback = "16 / 9",
+): string {
+  if (
+    meta &&
+    typeof meta.width === "number" &&
+    typeof meta.height === "number" &&
+    meta.width > 0 &&
+    meta.height > 0
+  ) {
+    return `${meta.width} / ${meta.height}`;
+  }
+  return fallback;
+}
+
 export function parseFrameRate(rate: string | undefined): number {
   if (!rate) {
     return 0;
