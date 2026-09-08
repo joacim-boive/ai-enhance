@@ -34,6 +34,8 @@ export type GpuQueueWaitUpdate = {
   message: string;
   level: JobEventLevel;
   stage: string;
+  progress: number;
+  runpodStatus: "IN_QUEUE" | "IN_PROGRESS" | "unknown";
 };
 
 const ON_DEMAND_MESSAGE =
@@ -283,12 +285,70 @@ export function gpuWorkerStatusMessage(snapshot: GpuWorkerSnapshot | null): stri
   return parts.join(" ");
 }
 
+export function parseGpuProgressOutput(output: unknown): {
+  percent: number;
+  stage: string;
+  detail: string | null;
+} | null {
+  if (output == null) {
+    return null;
+  }
+  if (typeof output === "string") {
+    const trimmed = output.trim();
+    if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+      try {
+        return parseGpuProgressOutput(JSON.parse(trimmed) as unknown);
+      } catch {
+        // Fall through to percent-in-text.
+      }
+    }
+    const match = trimmed.match(/(\d{1,3})\s*%/);
+    if (match) {
+      return {
+        percent: clampPercent(Number(match[1])),
+        stage: "Enhancing on GPU",
+        detail: trimmed.slice(0, 180),
+      };
+    }
+    if (trimmed.length > 0 && trimmed.length < 180) {
+      return { percent: 30, stage: "Enhancing on GPU", detail: trimmed };
+    }
+    return null;
+  }
+  const record = asRecord(output);
+  if (!record) {
+    return null;
+  }
+  const nested = asRecord(record.output) ?? record;
+  const percentRaw = nested.percent ?? nested.progress;
+  const percent = typeof percentRaw === "number" ? percentRaw : Number(percentRaw);
+  const stage =
+    (typeof nested.stage === "string" && nested.stage) ||
+    (typeof nested.status === "string" && nested.status) ||
+    null;
+  const detail =
+    (typeof nested.detail === "string" && nested.detail) ||
+    (typeof nested.message === "string" && nested.message) ||
+    null;
+  if (Number.isFinite(percent) && percent >= 0) {
+    return {
+      percent: clampPercent(percent),
+      stage: stage ?? "Enhancing on GPU",
+      detail,
+    };
+  }
+  if (stage || detail) {
+    return { percent: 30, stage: stage ?? "Enhancing on GPU", detail };
+  }
+  return null;
+}
+
 export function gpuQueueWaitUpdate(
   snapshot: GpuWorkerSnapshot | null,
   runpodStatus: string | undefined,
 ): GpuQueueWaitUpdate {
   const message = gpuWorkerStatusMessage(snapshot);
-  const queued = runpodStatus === "IN_QUEUE" || !runpodStatus;
+  const queued = runpodStatus !== "IN_PROGRESS";
   const workers = snapshot;
   const stuck =
     Boolean(workers) &&
@@ -299,24 +359,99 @@ export function gpuQueueWaitUpdate(
     gpuWorkerReadyCount(workers) === 0 &&
     (workers?.initializing ?? 0) > 0;
   if (queued && stuck) {
-    return { message, level: "warn", stage: "Waiting on GPU worker" };
+    return {
+      message: `${message} The enhance job has not started on the GPU yet.`,
+      level: "warn",
+      stage: "Waiting on GPU worker",
+      progress: 10,
+      runpodStatus: "IN_QUEUE",
+    };
   }
   if (queued && warming) {
-    return { message, level: "info", stage: "Warming GPU" };
+    return {
+      message: `${message} The enhance job is still queued — the worker is not running it yet.`,
+      level: "info",
+      stage: "Warming GPU",
+      progress: 14,
+      runpodStatus: "IN_QUEUE",
+    };
   }
   if (queued && (workers?.running ?? 0) > 0) {
     return {
-      message: `${message} Your job is still queued.`,
+      message: `${message} Your job is still queued and has not started.`,
       level: "info",
       stage: "Queued on GPU",
+      progress: 16,
+      runpodStatus: "IN_QUEUE",
+    };
+  }
+  if (queued) {
+    return {
+      message: "Queued on Runpod. Waiting for an RTX 4090 worker — the job has not started yet.",
+      level: "info",
+      stage: "Queued on GPU",
+      progress: 12,
+      runpodStatus: "IN_QUEUE",
     };
   }
   return {
-    message: queued
-      ? "Queued on Runpod. Waiting for an RTX 4090 worker."
-      : "Enhancing on the RTX 4090.",
+    message: "Enhancing on the RTX 4090.",
     level: "info",
-    stage: queued ? "Queued on GPU" : "Enhancing on GPU",
+    stage: "Enhancing on GPU",
+    progress: 30,
+    runpodStatus: "IN_PROGRESS",
+  };
+}
+
+export function gpuLiveProgress(input: {
+  runpodStatus: string | undefined;
+  snapshot: GpuWorkerSnapshot | null;
+  output?: unknown;
+  delayTimeMs?: number;
+  executionTimeMs?: number;
+  workerId?: string | null;
+}): GpuQueueWaitUpdate {
+  const queued = input.runpodStatus !== "IN_PROGRESS";
+  if (queued) {
+    const update = gpuQueueWaitUpdate(input.snapshot, input.runpodStatus ?? "IN_QUEUE");
+    const waited = formatDurationMs(input.delayTimeMs);
+    if (!waited) {
+      return update;
+    }
+    return {
+      ...update,
+      message: `${update.message} Queued for ${waited}.`,
+    };
+  }
+  const parsed = parseGpuProgressOutput(input.output);
+  const worker = input.workerId
+    ? input.snapshot?.workers.find((item) => item.id === input.workerId)
+    : undefined;
+  const region = worker ? formatDataCenter(worker.dataCenterId) : null;
+  const ran = formatDurationMs(input.executionTimeMs);
+  const parts: string[] = [];
+  if (region) {
+    parts.push(`GPU is running in ${region}.`);
+  } else if (input.workerId) {
+    parts.push(`GPU worker ${input.workerId} is running.`);
+  } else {
+    parts.push("GPU worker is running the job.");
+  }
+  if (parsed?.detail) {
+    parts.push(parsed.detail);
+  }
+  if (ran) {
+    parts.push(`On GPU for ${ran}.`);
+  }
+  const percent =
+    parsed?.percent ??
+    clampPercent(30 + Math.min(40, Math.floor((input.executionTimeMs ?? 0) / 15000)));
+  return {
+    message: parts.join(" "),
+    level: "info",
+    stage: parsed?.stage ?? "Enhancing on GPU",
+    progress: percent,
+    runpodStatus: "IN_PROGRESS",
   };
 }
 
@@ -432,4 +567,26 @@ function stringOrNull(value: unknown): string | null {
 
 function numberOr(value: unknown, fallback: number): number {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function clampPercent(value: number): number {
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
+  return Math.max(0, Math.min(99, Math.round(value)));
+}
+
+function formatDurationMs(ms: number | undefined): string | null {
+  if (typeof ms !== "number" || !Number.isFinite(ms) || ms < 1000) {
+    return null;
+  }
+  const seconds = Math.round(ms / 1000);
+  if (seconds < 60) {
+    return `${seconds}s`;
+  }
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) {
+    return `${minutes} min`;
+  }
+  return `${(minutes / 60).toFixed(1)} h`;
 }

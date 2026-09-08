@@ -35,9 +35,10 @@ export function JobRail({ job, gpu = null, onCancel, onRetry }: Props) {
             Live processing
           </p>
           <h3 className="mt-1 font-serif text-2xl tracking-tight">{job.stage}</h3>
-          <p className="mt-1 font-mono text-[11px] uppercase tracking-[0.16em] text-[var(--muted)]">
-            {engineLabel(job.engine, job.settings)} · {job.progress}% · ETA {formatEta(job.etaSec)}
-          </p>
+      <p className="mt-1 font-mono text-[11px] uppercase tracking-[0.16em] text-[var(--muted)]">
+        {engineLabel(job.engine, job.settings)} · {job.progress}%
+        {job.etaSec != null ? ` · ETA ${formatEta(job.etaSec)}` : null}
+      </p>
         </div>
         <div className="flex gap-2">
           {active ? (

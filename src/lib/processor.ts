@@ -396,12 +396,7 @@ async function runGpu(
   const current = (await loadJob(job.id)) ?? job;
   const runpodJobId = current.runpodJobId ?? (await dispatchGpu(current, target));
 
-  let ticks = 18;
-  const pulse = setInterval(() => {
-    ticks = Math.min(88, ticks + 2);
-    void patchJob(job.id, { progress: ticks, status: "processing", stage: "Enhancing on GPU" });
-  }, 4000);
-
+  let lastEventKey = "";
   try {
     const onAbort = () => {
       void cancelGpuJob(runpodJobId);
@@ -409,10 +404,20 @@ async function runGpu(
     signal.addEventListener("abort", onAbort, { once: true });
     const output = await pollGpuJob(runpodJobId, signal, {
       onWait: async (update) => {
+        await patchJob(job.id, {
+          status: update.runpodStatus === "IN_PROGRESS" ? "processing" : "warming",
+          stage: update.stage,
+          progress: update.progress,
+        });
+        const eventKey = `${update.stage}|${update.level}|${update.message}|${Math.floor(update.progress / 5)}`;
+        if (eventKey === lastEventKey) {
+          return;
+        }
+        lastEventKey = eventKey;
         await appendEvent(job.id, {
           stage: update.stage,
           message: update.message,
-          progress: ticks,
+          progress: update.progress,
           level: update.level,
         });
       },
@@ -425,8 +430,6 @@ async function runGpu(
       void cancelGpuJob(runpodJobId);
     }
     throw error;
-  } finally {
-    clearInterval(pulse);
   }
 }
 

@@ -2,9 +2,9 @@ import { missingGpuKeyMessage, r2Enabled, runtimeEnv } from "./env";
 import {
   gpuHealthKind,
   gpuIssueFromLogLines,
+  gpuLiveProgress,
   gpuMissingR2Message,
   gpuOnDemandMessage,
-  gpuQueueWaitUpdate,
   gpuShouldAlert,
   gpuUnreachableMessage,
   gpuWorkerReadyCount,
@@ -51,6 +51,9 @@ type RunpodStatusResponse = {
   status?: "IN_QUEUE" | "IN_PROGRESS" | "COMPLETED" | "FAILED" | "CANCELLED" | "TIMED_OUT";
   output?: unknown;
   error?: string;
+  delayTime?: number;
+  executionTime?: number;
+  workerId?: string;
 };
 
 export async function gpuHealth(): Promise<HealthStatus["gpu"]> {
@@ -431,7 +434,7 @@ export async function pollGpuJob(
   }
   const started = Date.now();
   let lastWorkerCheck = 0;
-  let lastWaitMessage = "";
+  let lastSnapshot: GpuWorkerSnapshot | null = null;
   while (!signal.aborted) {
     const data = await getGpuJobStatus(jobId);
     if (data.status === "COMPLETED") {
@@ -448,39 +451,45 @@ export async function pollGpuJob(
     ) {
       throw new Error(gpuFailureMessage(collectGpuErrorText(data), data.status));
     }
-    if (data.status === "IN_QUEUE" || !data.status) {
+    if (data.status === "IN_QUEUE" || data.status === "IN_PROGRESS" || !data.status) {
       const elapsedMs = Date.now() - started;
       const now = Date.now();
-      let snapshot: GpuWorkerSnapshot | null = null;
       if (now - lastWorkerCheck >= WORKER_POLL_MS) {
         lastWorkerCheck = now;
         const fetched = await fetchGpuWorkerSnapshot();
-        snapshot = fetched.snapshot
-          ? await diagnoseGpuWorkers(fetched.snapshot)
-          : null;
-        const update = gpuQueueWaitUpdate(snapshot, data.status);
-        const notable =
-          update.level === "warn" ||
-          Boolean(snapshot && snapshot.workers.length > 0);
-        if (options?.onWait && notable && update.message !== lastWaitMessage) {
-          lastWaitMessage = update.message;
-          await options.onWait(update);
+        if (fetched.snapshot) {
+          lastSnapshot =
+            data.status === "IN_PROGRESS"
+              ? fetched.snapshot
+              : await diagnoseGpuWorkers(fetched.snapshot);
         }
       }
-      if (elapsedMs > GPU_QUEUE_TIMEOUT_MS) {
-        if (!snapshot) {
+      if (options?.onWait) {
+        await options.onWait(
+          gpuLiveProgress({
+            runpodStatus: data.status,
+            snapshot: lastSnapshot,
+            output: data.output,
+            delayTimeMs: data.delayTime,
+            executionTimeMs: data.executionTime,
+            workerId: data.workerId ?? null,
+          }),
+        );
+      }
+      if ((data.status === "IN_QUEUE" || !data.status) && elapsedMs > GPU_QUEUE_TIMEOUT_MS) {
+        if (!lastSnapshot) {
           const fetched = await fetchGpuWorkerSnapshot();
-          snapshot = fetched.snapshot;
+          lastSnapshot = fetched.snapshot;
         }
         if (
           !shouldExtendGpuQueueWait({
             elapsedMs,
             timeoutMs: GPU_QUEUE_TIMEOUT_MS,
             hardTimeoutMs: GPU_QUEUE_HARD_TIMEOUT_MS,
-            workers: snapshot,
+            workers: lastSnapshot,
           })
         ) {
-          const diagnosed = snapshot ? gpuWorkerStatusMessage(snapshot) : null;
+          const diagnosed = lastSnapshot ? gpuWorkerStatusMessage(lastSnapshot) : null;
           throw new Error(
             diagnosed && diagnosed !== gpuOnDemandMessage()
               ? diagnosed

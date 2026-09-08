@@ -5,10 +5,12 @@ import {
   gpuBadgeLabel,
   gpuHealthKind,
   gpuIssueFromLogLine,
+  gpuLiveProgress,
   gpuQueueWaitUpdate,
   gpuShouldAlert,
   gpuShowsFleetBanner,
   gpuWorkerStatusMessage,
+  parseGpuProgressOutput,
   parseGpuWorkersResponse,
 } from "./gpu-health";
 import type { HealthStatus } from "./types";
@@ -184,6 +186,9 @@ test("throttled Hub auth logs become a human message", () => {
   const wait = gpuQueueWaitUpdate(snapshot, "IN_QUEUE");
   assert.equal(wait.level, "warn");
   assert.equal(wait.stage, "Waiting on GPU worker");
+  assert.equal(wait.progress, 10);
+  assert.equal(wait.runpodStatus, "IN_QUEUE");
+  assert.match(wait.message, /has not started on the GPU yet/);
 });
 
 test("warming workers stay informational", () => {
@@ -243,6 +248,46 @@ test("formatDataCenter labels known prefixes", () => {
   assert.equal(formatDataCenter("EUR-NO-1"), "EUR-NO-1 (Europe)");
   assert.equal(formatDataCenter("US-IL-1"), "US-IL-1 (United States)");
   assert.equal(formatDataCenter(null), "an unknown region");
+});
+
+test("queued jobs stay in the low progress band instead of a fake 88%", () => {
+  const queued = gpuLiveProgress({
+    runpodStatus: "IN_QUEUE",
+    snapshot: parseGpuWorkersResponse(liveFleet),
+    delayTimeMs: 120_000,
+  });
+  assert.equal(queued.runpodStatus, "IN_QUEUE");
+  assert.ok(queued.progress < 25);
+  assert.match(queued.message, /has not started/);
+  assert.match(queued.message, /Queued for 2 min/);
+});
+
+test("IN_PROGRESS progress comes from the worker payload, not a timer", () => {
+  const parsed = parseGpuProgressOutput({
+    percent: 44,
+    stage: "SeedVR2",
+    detail: "12/30 samples",
+  });
+  assert.equal(parsed?.percent, 44);
+  assert.equal(parsed?.stage, "SeedVR2");
+  const live = gpuLiveProgress({
+    runpodStatus: "IN_PROGRESS",
+    snapshot: parseGpuWorkersResponse(liveFleet),
+    output: JSON.stringify({ percent: 44, stage: "SeedVR2", detail: "12/30 samples" }),
+    executionTimeMs: 90_000,
+    workerId: "running-eu",
+  });
+  assert.equal(live.progress, 44);
+  assert.equal(live.stage, "SeedVR2");
+  assert.match(live.message, /EUR-NO-1/);
+  assert.match(live.message, /On GPU for 2 min/);
+  const unknown = gpuLiveProgress({
+    runpodStatus: "IN_PROGRESS",
+    snapshot: null,
+    executionTimeMs: 0,
+  });
+  assert.equal(unknown.progress, 30);
+  assert.ok(unknown.progress < 88);
 });
 
 function emptyCounts() {

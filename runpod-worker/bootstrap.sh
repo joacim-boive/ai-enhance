@@ -9,6 +9,7 @@ BASE="https://raw.githubusercontent.com/joacim-boive/ai-enhance/${REF}/runpod-wo
 mkdir -p /opt/lumen
 curl -fsSL "$BASE/vram.py" -o /vram.py
 curl -fsSL "$BASE/r2_put.py" -o /r2_put.py
+curl -fsSL "$BASE/progress.py" -o /progress.py
 curl -fsSL "$BASE/wrap.py" -o /opt/lumen/wrap.py
 
 if [ -f /handler.py ] && [ ! -f /hub_handler.py ]; then

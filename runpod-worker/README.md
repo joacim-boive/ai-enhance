@@ -27,7 +27,7 @@ Point the serverless start command at `bootstrap.sh`. It curls this directory fr
 bash -c "curl -fsSL https://raw.githubusercontent.com/joacim-boive/ai-enhance/cursor/gpu-oom-vram-311c/runpod-worker/bootstrap.sh | bash"
 ```
 
-Set `LUMEN_WORKER_REF` if the files live on another branch. After a wrap change, recycle the worker so the next boot curls the new `vram.py` / `wrap.py`.
+Set `LUMEN_WORKER_REF` if the files live on another branch. After a wrap change, recycle the worker so the next boot curls the new `vram.py` / `wrap.py` / `progress.py`. The wrap now sends Runpod `progress_update` payloads (ComfyUI sample counts, then R2 upload) so the studio bar can follow the job instead of a fake timer.
 
 ## Deploy a rebuilt image
 
