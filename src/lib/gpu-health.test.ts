@@ -153,6 +153,10 @@ test("throttled Hub auth logs become a human message", () => {
     /Hub registry auth/,
   );
   assert.match(
+    gpuIssueFromLogLine("WARN: container is unhealthy: triggered memory limits (OOM)") ?? "",
+    /RAM interpolating/,
+  );
+  assert.match(
     gpuIssueFromLogLine(
       "image pull: registry.runpod.net/wlsdml1114-upscale-interpolation-runpod-hub-main-dockerfile:78b79f1b2: pending",
     ) ?? "",

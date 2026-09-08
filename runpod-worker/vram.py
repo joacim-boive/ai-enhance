@@ -18,11 +18,13 @@ DIT_TYPE = "SeedVR2LoadDiTModel"
 RIFE_TYPE = "RIFE VFI"
 VIDEO_COMPONENTS_TYPE = "GetVideoComponents"
 COMBINE_TYPE = "VHS_VideoCombine"
-# RIFE VFI only accepts an integer multiplier. 24→60 is 2.5×, so we go 5× to 120
-# and let ffmpeg keep the 60 fps samples after encode. Custom ComfyUI nodes
-# registered in this handler process never reach the ComfyUI server.
-# Cap so 25→60 does not explode to 12×.
+# RIFE VFI only accepts an integer multiplier. 24→60 is 2.5×, so 5× (120 fps)
+# hits exact 60 fps timestamps — but RIFE concatenates every output frame into
+# one CPU tensor. A 1080×1920 10s clip at 5× is ~30 GB and trips the serverless
+# cgroup ("triggered memory limits (OOM)"). Cap the in-graph multiplier from
+# clip size; ffmpeg then interpolates 48→60 when 5× will not fit.
 MAX_RIFE_MULTIPLIER = 8
+RIFE_RAM_BUDGET_BYTES = 6 * 1024 * 1024 * 1024
 
 
 def max_short_side() -> int:
@@ -104,14 +106,49 @@ class RifeFpsPlan(NamedTuple):
     resample: bool
 
 
-def rife_fps_plan(source_fps: float, target_fps: float) -> RifeFpsPlan:
+def rife_ram_budget_bytes() -> int:
+    raw = os.environ.get("LUMEN_RIFE_RAM_BUDGET_BYTES")
+    if raw:
+        try:
+            return max(512 * 1024 * 1024, int(raw))
+        except ValueError:
+            pass
+    return RIFE_RAM_BUDGET_BYTES
+
+
+def rife_ram_multiplier_cap(job_input: dict[str, Any] | None) -> int:
+    """Largest RIFE multiplier whose output IMAGE tensor should fit in RAM."""
+    if not job_input:
+        return 2
+    width = _as_int(job_input.get("width"), 0)
+    height = _as_int(job_input.get("height"), 0)
+    duration = _as_float(job_input.get("duration"))
+    if duration is None:
+        duration = _as_float(job_input.get("duration_sec"))
+    source = _as_float(job_input.get("source_fps"))
+    if width < 16 or height < 16 or duration is None or source is None:
+        # Unknown size: stay on 2×, which already fitted this worker's cgroup.
+        return 2
+    frame_bytes = width * height * 3 * 4
+    source_frames = max(1.0, source * duration)
+    cap = int(rife_ram_budget_bytes() / max(frame_bytes * source_frames, 1.0))
+    return max(2, min(MAX_RIFE_MULTIPLIER, cap))
+
+
+def rife_fps_plan(
+    source_fps: float,
+    target_fps: float,
+    max_multiplier: int | None = None,
+) -> RifeFpsPlan:
     """Integer RIFE multiplier that can land on an exact target fps.
 
     RIFE queries independent timesteps (i/multiplier). 24→60 uses 5× so
-    0.4 and 0.8 exist. Encode that 120 fps stream, then ffmpeg keeps every
-    2nd frame. Snapping to 2× would yield 48 fps. A custom ComfyUI node
-    registered in this handler never reaches the ComfyUI server.
+    0.4 and 0.8 exist. That 120 fps tensor OOMs a phone clip on the 4090
+    worker, so callers pass a RAM cap (usually 2). ffmpeg then interpolates
+    48→60. Snapping to 2× without the ffmpeg step would yield 48 fps.
     """
+    cap = MAX_RIFE_MULTIPLIER if max_multiplier is None else int(max_multiplier)
+    cap = max(1, min(MAX_RIFE_MULTIPLIER, cap))
     if source_fps <= 0 or target_fps <= 0:
         return RifeFpsPlan(2, max(target_fps, 1), max(target_fps, 1), 1, False)
 
@@ -125,7 +162,7 @@ def rife_fps_plan(source_fps: float, target_fps: float) -> RifeFpsPlan:
             abs(target_fps - source_fps) > 0.08,
         )
 
-    for multiplier in range(2, MAX_RIFE_MULTIPLIER + 1):
+    for multiplier in range(2, cap + 1):
         dense = source_fps * multiplier
         step = dense / target_fps
         nearest = round(step)
@@ -138,7 +175,7 @@ def rife_fps_plan(source_fps: float, target_fps: float) -> RifeFpsPlan:
                 nearest > 1 or abs(dense - target_fps) > 0.08,
             )
 
-    multiplier = min(MAX_RIFE_MULTIPLIER, max(2, math.ceil(ratio - 1e-9)))
+    multiplier = min(cap, max(1, math.ceil(ratio - 1e-9)))
     dense = source_fps * multiplier
     return RifeFpsPlan(multiplier, dense, target_fps, 1, abs(dense - target_fps) > 0.08)
 
@@ -168,14 +205,16 @@ def apply_rife_fps(prompt: dict[str, Any], job_input: dict[str, Any] | None) -> 
     multiplier = 2
     frame_rate: float | None = None
     if source is not None and target is not None:
-        plan = rife_fps_plan(source, target)
+        cap = rife_ram_multiplier_cap(job_input)
+        plan = rife_fps_plan(source, target, max_multiplier=cap)
         multiplier = plan.multiplier
         frame_rate = plan.rife_fps
         extra = (
             f", then ffmpeg to {plan.output_fps:g}" if plan.resample else ""
         )
         print(
-            f"Lumen wrap: RIFE {source:g}→{target:g} via {multiplier}× ({plan.rife_fps:g} fps){extra}",
+            f"Lumen wrap: RIFE {source:g}→{target:g} via {multiplier}× "
+            f"({plan.rife_fps:g} fps, RAM cap {cap}×){extra}",
             flush=True,
         )
     elif target is not None:

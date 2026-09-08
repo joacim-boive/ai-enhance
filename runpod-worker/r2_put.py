@@ -199,33 +199,60 @@ def output_needs_rotation(width: Any, height: Any, rotation: int) -> bool:
 def output_needs_fps(current: Any, target: float | None) -> bool:
     if target is None or not isinstance(current, (int, float)):
         return False
-    return float(current) > target + 0.15
+    return abs(float(current) - target) > 0.15
+
+
+def fps_vf(current: float, target: float) -> list[str]:
+    """ffmpeg graphs that land on target fps. Try motion interp when raising fps."""
+    rate = fps_filter_value(target)
+    if current > target + 0.15:
+        return [f"fps={rate}"]
+    return [
+        f"minterpolate=fps={rate}:mi_mode=mci:mc_mode=aobmc:me_mode=bidir:vsbmc=1:scd=fdiff",
+        f"minterpolate=fps={rate}:mi_mode=blend",
+        f"fps={rate}",
+    ]
 
 
 def conform_output(path: str, job_input: dict[str, Any] | None) -> str:
-    """One ffmpeg pass: drop RIFE's extra frames (120→60) and bake 9:16 rotation."""
+    """One ffmpeg pass: match target fps and bake 9:16 rotation."""
     if not job_input:
         return path
     target = job_target_fps(job_input)
     rotation = normalize_rotation(job_input.get("rotation"))
     probe = probe_video(path)
-    filters: list[str] = []
-    notes: list[str] = []
-    need_fps = output_needs_fps(probe.get("fps"), target) and target is not None
+    current = probe.get("fps")
+    need_fps = output_needs_fps(current, target) and target is not None
     vf_rot = transpose_filter(rotation)
     need_rot = bool(vf_rot and output_needs_rotation(probe.get("width"), probe.get("height"), rotation))
-    if need_fps and target is not None:
-        filters.append(f"fps={fps_filter_value(target)}")
-        notes.append(f"{float(probe.get('fps') or 0):g}→{target:g} fps")
-    if need_rot and vf_rot:
-        filters.append(vf_rot)
-        notes.append(f"rotate {rotation} deg")
-    if not filters:
+    if not need_fps and not need_rot:
         return path
+    fps_candidates = (
+        fps_vf(float(current), target) if need_fps and target is not None and isinstance(current, (int, float)) else [None]
+    )
     dest = _conformed_path(path, target if need_fps else None, rotation if need_rot else 0)
-    _ffmpeg_filters(path, dest, ",".join(filters))
-    print(f"Lumen wrap: conformed output ({', '.join(notes)})", flush=True)
-    return dest
+    last_error: Exception | None = None
+    for fps_filter in fps_candidates:
+        filters: list[str] = []
+        notes: list[str] = []
+        if fps_filter:
+            filters.append(fps_filter)
+            notes.append(f"{float(current or 0):g}→{target:g} fps")
+        if need_rot and vf_rot:
+            filters.append(vf_rot)
+            notes.append(f"rotate {rotation} deg")
+        if not filters:
+            return path
+        try:
+            _ffmpeg_filters(path, dest, ",".join(filters))
+            print(f"Lumen wrap: conformed output ({', '.join(notes)})", flush=True)
+            return dest
+        except (subprocess.CalledProcessError, FileNotFoundError) as error:
+            last_error = error
+            continue
+    if last_error:
+        raise last_error
+    return path
 
 
 def conform_output_rotation(path: str, job_input: dict[str, Any] | None) -> str:

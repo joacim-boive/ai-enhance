@@ -10,6 +10,7 @@ from r2_put import (
     fps_filter_value,
     job_target_fps,
     normalize_rotation,
+    output_needs_fps,
     output_needs_rotation,
     probe_video,
     transpose_filter,
@@ -92,6 +93,9 @@ class R2PutTests(unittest.TestCase):
         self.assertTrue(output_needs_rotation(3840, 2160, 90))
         self.assertFalse(output_needs_rotation(2160, 3840, 90))
         self.assertFalse(output_needs_rotation(3840, 2160, 0))
+        self.assertTrue(output_needs_fps(48, 60))
+        self.assertTrue(output_needs_fps(120, 60))
+        self.assertFalse(output_needs_fps(60, 60))
 
     def test_conform_output_rotation_transposes_landscape_master(self) -> None:
         src = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False).name
@@ -160,6 +164,43 @@ class R2PutTests(unittest.TestCase):
             self.assertEqual(probe.get("fps"), 60.0)
             self.assertEqual(probe.get("width"), 16)
             self.assertEqual(probe.get("height"), 32)
+        except FileNotFoundError:
+            self.skipTest("ffmpeg not available")
+        finally:
+            for path in {src, out}:
+                if os.path.isfile(path):
+                    os.unlink(path)
+
+    def test_conform_output_interpolates_48_to_60(self) -> None:
+        src = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False).name
+        out = src
+        try:
+            subprocess.check_call(
+                [
+                    "ffmpeg",
+                    "-y",
+                    "-hide_banner",
+                    "-loglevel",
+                    "error",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "color=c=green:s=16x16:r=48:d=1",
+                    "-c:v",
+                    "libx264",
+                    "-pix_fmt",
+                    "yuv420p",
+                    src,
+                ],
+                timeout=30,
+            )
+            out = conform_output_fps(src, {"fps": 60})
+            self.assertNotEqual(out, src)
+            probe = probe_video(out)
+            self.assertEqual(probe.get("fps"), 60.0)
+            duration = float(probe.get("duration") or 0)
+            self.assertGreater(duration, 0.8)
+            self.assertLess(duration, 1.3)
         except FileNotFoundError:
             self.skipTest("ffmpeg not available")
         finally:

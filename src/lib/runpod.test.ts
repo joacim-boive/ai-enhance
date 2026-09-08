@@ -56,6 +56,11 @@ test("parseGpuObjectOutput reads object_key and never requires inline bytes", ()
 
 test("gpuFailureMessage rewrites SeedVR2 device allocation OOMs", () => {
   assert.equal(isGpuOom("Error in Phase 1 (Encoding): Allocation on device"), true);
+  assert.equal(isGpuOom("WARN: container is unhealthy: triggered memory limits (OOM)"), true);
+  assert.match(
+    gpuFailureMessage("WARN: container is unhealthy: triggered memory limits (OOM)"),
+    /RAM interpolating/,
+  );
   assert.match(
     gpuFailureMessage("torch.OutOfMemoryError: Allocation on device"),
     /VRAM/,
