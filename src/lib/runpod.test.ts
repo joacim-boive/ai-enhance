@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   gpuFailureMessage,
   gpuOutputLooksLikeBytes,
+  gpuShouldAlert,
   isGpuConfigured,
   isGpuOom,
   parseGpuObjectOutput,
@@ -54,4 +55,40 @@ test("gpuFailureMessage rewrites SeedVR2 device allocation OOMs", () => {
     /VRAM/,
   );
   assert.equal(gpuFailureMessage("", "FAILED"), "GPU job failed");
+});
+
+test("gpuShouldAlert stays quiet when the worker is merely cold or unset", () => {
+  assert.equal(
+    gpuShouldAlert({
+      configured: false,
+      r2Ready: false,
+      reachable: true,
+      httpOk: true,
+      ready: false,
+      throttled: 0,
+    }),
+    false,
+  );
+  assert.equal(
+    gpuShouldAlert({
+      configured: true,
+      r2Ready: true,
+      reachable: true,
+      httpOk: true,
+      ready: false,
+      throttled: 0,
+    }),
+    false,
+  );
+  assert.equal(
+    gpuShouldAlert({
+      configured: true,
+      r2Ready: true,
+      reachable: false,
+      httpOk: true,
+      ready: false,
+      throttled: 0,
+    }),
+    true,
+  );
 });

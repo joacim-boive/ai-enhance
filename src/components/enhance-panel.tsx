@@ -134,12 +134,12 @@ export function EnhancePanel({
             />
           ))}
         </div>
-        {health && !health.gpu.configured ? (
-          <p className="mt-3 text-[11px] leading-5 text-[var(--gold)]">{health.gpu.message}</p>
-        ) : health && !health.r2?.configured ? (
+        {health && !health.r2?.configured ? (
           <p className="mt-3 text-[11px] leading-5 text-[var(--gold)]">
             GPU needs private R2 so the worker can upload the master without sending bytes through Vercel.
           </p>
+        ) : health?.gpu.alert ? (
+          <p className="mt-3 text-[11px] leading-5 text-[var(--gold)]">{health.gpu.message}</p>
         ) : null}
       </div>
 

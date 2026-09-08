@@ -44,6 +44,23 @@ type RunpodHealth = {
   };
 };
 
+export function gpuShouldAlert(input: {
+  configured: boolean;
+  r2Ready: boolean;
+  reachable: boolean;
+  httpOk: boolean;
+  ready: boolean;
+  throttled: number;
+}): boolean {
+  if (!input.configured) {
+    return false;
+  }
+  if (!input.r2Ready || !input.reachable || !input.httpOk) {
+    return true;
+  }
+  return input.throttled > 0 && !input.ready;
+}
+
 export async function gpuHealth(): Promise<HealthStatus["gpu"]> {
   const { apiKey, endpointId } = runpodConfig();
   if (!apiKey) {
@@ -51,6 +68,7 @@ export async function gpuHealth(): Promise<HealthStatus["gpu"]> {
       configured: false,
       endpointId: null,
       ready: false,
+      alert: false,
       workers: null,
       message: missingGpuKeyMessage(),
     };
@@ -65,6 +83,7 @@ export async function gpuHealth(): Promise<HealthStatus["gpu"]> {
         configured: true,
         endpointId,
         ready: false,
+        alert: true,
         workers: null,
         message: `GPU endpoint returned ${response.status}. Jobs will fall back to CPU.`,
       };
@@ -77,8 +96,9 @@ export async function gpuHealth(): Promise<HealthStatus["gpu"]> {
       throttled: data.workers?.throttled ?? 0,
     };
     const ready = workers.idle + workers.running > 0;
+    const r2Ready = r2Enabled();
     let message = "GPU is cold. The first job warms a worker, then runs SeedVR2 + RIFE.";
-    if (!r2Enabled()) {
+    if (!r2Ready) {
       message =
         "GPU is configured, but Cloudflare R2 is missing. The worker cannot land a private master without a presigned upload.";
     } else if (ready) {
@@ -92,7 +112,15 @@ export async function gpuHealth(): Promise<HealthStatus["gpu"]> {
     return {
       configured: true,
       endpointId,
-      ready: r2Enabled() ? ready : false,
+      ready: r2Ready ? ready : false,
+      alert: gpuShouldAlert({
+        configured: true,
+        r2Ready,
+        reachable: true,
+        httpOk: true,
+        ready,
+        throttled: workers.throttled,
+      }),
       workers,
       message,
     };
@@ -101,6 +129,7 @@ export async function gpuHealth(): Promise<HealthStatus["gpu"]> {
       configured: true,
       endpointId,
       ready: false,
+      alert: true,
       workers: null,
       message: "Could not reach Runpod. CPU fallback will be used.",
     };
