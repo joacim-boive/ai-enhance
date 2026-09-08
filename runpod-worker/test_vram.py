@@ -129,6 +129,5 @@ class VramTests(unittest.TestCase):
         self.assertEqual(patched["25"]["inputs"]["frame_rate"], 60)
         apply_rife_fps(patched, {"fps": 60, "source_fps": 30})
 
-
 if __name__ == "__main__":
     unittest.main()
