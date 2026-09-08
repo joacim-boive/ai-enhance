@@ -75,8 +75,8 @@ export const FPS_OPTIONS: { id: FpsMode; label: string }[] = [
 ];
 
 export const DEFAULT_SETTINGS: JobSettings = {
-  preset: "restore",
-  scale: "2x",
+  preset: "custom",
+  scale: "none",
   fps: "keep",
   denoise: true,
   sharpen: false,

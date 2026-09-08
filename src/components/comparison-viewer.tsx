@@ -2,7 +2,12 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { KeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
-import { formatDuration, formatFps, formatResolution } from "@/lib/format";
+import {
+  aspectRatioForMeta,
+  formatDuration,
+  formatFps,
+  formatResolution,
+} from "@/lib/format";
 import { withDownloadParam } from "@/lib/url";
 import type { PublicJob } from "@/lib/types";
 
@@ -35,6 +40,8 @@ export function ComparisonViewer({ job, onContinue }: Props) {
 
   const out = job.outputMeta;
   const src = job.sourceMeta;
+  const targetMeta = out ?? src;
+  const aspect = aspectRatioForMeta(targetMeta);
 
   const updateSplitFromPointer = useCallback((clientX: number) => {
     const container = containerRef.current;
@@ -356,7 +363,8 @@ export function ComparisonViewer({ job, onContinue }: Props) {
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerUp}
-        className={`relative aspect-video select-none overflow-hidden bg-black ${
+        style={{ aspectRatio: aspect }}
+        className={`relative flex max-h-[75vh] w-full select-none items-center justify-center overflow-hidden bg-black ${
           mode === "split" ? "cursor-ew-resize touch-none" : ""
         }`}
       >
@@ -461,7 +469,6 @@ export function ComparisonViewer({ job, onContinue }: Props) {
                     className="h-4 w-4 fill-current transition-transform group-hover:scale-110"
                     viewBox="0 0 24 24"
                   >
-                    <path d="M8.59 16.59L10 18l6-6-6-6-1.41 1.41L13.17 12z" className="hidden" />
                     <path d="M7 12l5-5v10l-5-5zm10 0l-5 5V7l5 5z" />
                   </svg>
 

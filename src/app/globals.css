@@ -12,6 +12,8 @@
   --gold: #e2b57a;
   --gold-2: #c48a42;
   --teal: #7dcea0;
+  --teal-2: #27ae60;
+  --teal-glow: #a9dfbf;
   --blue: #8aa4ff;
   --warn: #e8c36a;
   --err: #e07a6a;
@@ -92,17 +94,26 @@ input {
 }
 
 .progress-sheen {
-  background: linear-gradient(90deg, var(--gold-2), var(--gold), #f3d7a8);
+  background: linear-gradient(
+    90deg,
+    var(--teal-2) 0%,
+    var(--teal) 25%,
+    var(--teal-glow) 50%,
+    var(--teal) 75%,
+    var(--teal-2) 100%
+  );
   background-size: 200% 100%;
-  animation: sheen 2.4s linear infinite;
+  animation: sheen 2s linear infinite;
+  box-shadow: 0 0 10px rgba(125, 206, 160, 0.45);
+  transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 @keyframes sheen {
   from {
-    background-position: 0% 50%;
+    background-position: 200% 0;
   }
   to {
-    background-position: 200% 50%;
+    background-position: 0% 0;
   }
 }
 
