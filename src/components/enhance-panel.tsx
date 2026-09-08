@@ -5,6 +5,7 @@ import {
   FPS_OPTIONS,
   PRESETS,
   SCALE_OPTIONS,
+  enhanceEngineCopy,
   outputSizeNotice,
   resolveOutputTarget,
   scaleExceeds8k,
@@ -39,8 +40,8 @@ export function EnhancePanel({
   const target = meta ? resolveOutputTarget(meta, settings) : null;
   const sizeNotice = target ? outputSizeNotice(target) : null;
   const engines: { id: EnginePreference; label: string }[] = [
-    { id: "auto", label: "Auto" },
     { id: "gpu", label: "GPU" },
+    { id: "auto", label: "Auto" },
     { id: "cpu", label: "CPU" },
   ];
 
@@ -138,6 +139,9 @@ export function EnhancePanel({
             />
           ))}
         </div>
+        <p className="mt-3 text-[11px] leading-5 text-[var(--muted)]">
+          GPU is the fast path. CPU is ffmpeg on the server.
+        </p>
         {health && !health.r2?.configured ? (
           <p className="mt-3 text-[11px] leading-5 text-[var(--gold)]">
             GPU needs private R2 so the worker can upload the master without sending bytes through Vercel.
@@ -174,7 +178,7 @@ export function EnhancePanel({
           {working ? workingLabel : buttonLabel}
         </button>
         <p className="text-center text-[11px] text-[var(--muted)]">
-          GPU uses SeedVR2 + RIFE 4.9 on an RTX 4090. Results above 4K show a warning; nothing above 8K is allowed.
+          {enhanceEngineCopy(target)}
         </p>
       </div>
     </aside>

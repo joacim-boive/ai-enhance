@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   DEFAULT_SETTINGS,
+  enhanceEngineCopy,
+  gpuEngineLabel,
   gpuHubResolution,
   isNoOp,
   outputSizeNotice,
@@ -49,6 +51,34 @@ test("cinema 4k fits 720p into 3840x2160", () => {
   const target = resolveOutputTarget(meta, settingsFromPreset("cinema"));
   assert.equal(target.width, 3840);
   assert.equal(target.height, 2160);
+});
+
+test("explicit GPU preference always uses the 4090 when configured", () => {
+  assert.equal(
+    preferGpuEngine({
+      enginePreference: "gpu",
+      gpuConfigured: true,
+      scaleChanged: false,
+      fpsChanged: true,
+    }),
+    true,
+  );
+});
+
+test("default engine is GPU", () => {
+  assert.equal(DEFAULT_SETTINGS.enginePreference, "gpu");
+  assert.equal(settingsFromPreset("hfr").enginePreference, "gpu");
+});
+
+test("fps-only GPU jobs label as RIFE without SeedVR2", () => {
+  assert.equal(
+    gpuEngineLabel({ ...DEFAULT_SETTINGS, fps: "60" }),
+    "GPU · RIFE 4.9",
+  );
+  assert.equal(
+    enhanceEngineCopy({ fpsChanged: true, scaleChanged: false }),
+    "Frame interpolation runs RIFE 4.9 on the RTX 4090. SeedVR2 is skipped.",
+  );
 });
 
 test("auto uses GPU for fps-only jobs when configured", () => {

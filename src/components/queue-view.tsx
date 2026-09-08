@@ -178,7 +178,7 @@ export function QueueView({
                       <p className="mt-0.5 text-xs text-[var(--muted)]">
                         <span className="text-[var(--gold)]">{treatmentLabel(job.settings)}</span>
                         {" · "}
-                        <span>{engineLabel(job.engine)}</span>
+                        <span>{engineLabel(job.engine, job.settings)}</span>
                         {srcMeta && outMeta ? (
                           <span>
                             {" · "}
