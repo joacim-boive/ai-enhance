@@ -78,6 +78,7 @@ Open [http://localhost:3000](http://localhost:3000). FFmpeg must be on `PATH` or
 | `npm test`     | Filter-graph, keys, GPU output  |
 | `npm run build`| Production build                |
 | `npm run lint` | ESLint                          |
+| `graphify query`| Query project knowledge graph  |
 
 ## Layout
 
@@ -89,3 +90,12 @@ runpod-worker      Hub handler wrap that PUTs to a presigned URL
 ```
 
 Locally, small jobs can live in `.data/` (gitignored). On Vercel they live in private R2 under `users/{userId}/…`.
+
+## Knowledge Graph (Graphify)
+
+A code knowledge graph is maintained with Graphify:
+- **Query the graph**: `graphify query "<question>"`
+- **Trace paths**: `graphify path "<source>" "<target>"`
+- **Inspect concepts**: `graphify explain "<concept>"`
+- **Rebuild graph after edits**: `graphify update .`
+
