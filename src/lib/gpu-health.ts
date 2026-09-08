@@ -42,10 +42,10 @@ const ON_DEMAND_MESSAGE =
   "GPU is on demand. The first enhance job warms an RTX 4090.";
 
 const HUB_AUTH_MESSAGE =
-  "Hub registry auth failed — Runpod could not pull the worker image. Starting a worker in another region (Europe often works) usually clears this.";
+  "Hub registry auth failed — this data center could not pull the worker image. Another region that already has the image cached usually comes up first.";
 
 const HUB_PULL_MESSAGE =
-  "Hub image pull is stuck pending in this region. A worker in another data center, often Europe, usually comes up first.";
+  "Hub image pull is stuck pending in this region. Another data center that already has the image cached usually comes up first.";
 
 export function emptyGpuWorkerCounts(): GpuWorkerCounts {
   return { idle: 0, running: 0, initializing: 0, throttled: 0, unhealthy: 0 };

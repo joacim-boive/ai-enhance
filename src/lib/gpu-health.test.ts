@@ -193,6 +193,7 @@ test("throttled Hub auth logs become a human message", () => {
   const message = gpuWorkerStatusMessage(snapshot);
   assert.match(message, /US-IL-1/);
   assert.match(message, /Hub registry auth failed/);
+  assert.doesNotMatch(message, /Europe often works/);
   assert.equal(
     gpuHealthKind({
       configured: true,
