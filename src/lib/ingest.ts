@@ -101,6 +101,8 @@ async function finalizeIngest(input: {
     pathname: input.pathname,
     userId: input.userId,
     objectKey: input.objectKey,
+    meta,
+    thumbs,
   };
   await saveStoredFile(record);
   return {

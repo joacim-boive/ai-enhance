@@ -1,4 +1,5 @@
 import { missingGpuKeyMessage, r2Enabled, runtimeEnv } from "./env";
+import { GPU_QUEUE_HARD_TIMEOUT_MS, shouldExtendGpuQueueWait } from "./job-lifecycle";
 import type { HealthStatus } from "./types";
 
 const DEFAULT_ENDPOINT = "tbsk82cmm6azwh";
@@ -211,13 +212,23 @@ export async function pollGpuJob(
     ) {
       throw new Error(data.error || `GPU job ${data.status.toLowerCase()}`);
     }
-    if (
-      (data.status === "IN_QUEUE" || !data.status) &&
-      Date.now() - started > GPU_QUEUE_TIMEOUT_MS
-    ) {
-      throw new Error(
-        "GPU worker stayed queued while pulling the image. Falling back to CPU.",
-      );
+    if (data.status === "IN_QUEUE" || !data.status) {
+      const elapsedMs = Date.now() - started;
+      if (elapsedMs > GPU_QUEUE_TIMEOUT_MS) {
+        const health = await gpuHealth();
+        if (
+          !shouldExtendGpuQueueWait({
+            elapsedMs,
+            timeoutMs: GPU_QUEUE_TIMEOUT_MS,
+            hardTimeoutMs: GPU_QUEUE_HARD_TIMEOUT_MS,
+            workers: health.workers,
+          })
+        ) {
+          throw new Error(
+            "GPU worker stayed queued while pulling the image. Falling back to CPU.",
+          );
+        }
+      }
     }
     await sleep(2000, signal);
   }

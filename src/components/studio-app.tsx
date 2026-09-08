@@ -49,9 +49,6 @@ export function StudioApp() {
       const next = JSON.parse(event.data) as PublicJob;
       setJob(next);
     };
-    source.onerror = () => {
-      source.close();
-    };
     const timer = window.setInterval(() => {
       void pollJob(job.id, false);
     }, 2000);

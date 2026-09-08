@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireOwnedJob } from "@/lib/authz";
 import { appendEvent, loadJob, patchJob, toPublicJob } from "@/lib/jobs";
-import { startJob } from "@/lib/processor";
+import { startJob, submitGpuIfReady } from "@/lib/processor";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -45,7 +45,12 @@ export async function POST(
     progress: 1,
     level: "info",
   });
-  startJob(id);
   const latest = next ?? (await loadJob(id));
-  return NextResponse.json({ job: latest ? toPublicJob(latest) : toPublicJob(job) });
+  if (latest) {
+    const dispatched = await submitGpuIfReady(latest);
+    startJob(id);
+    return NextResponse.json({ job: toPublicJob(dispatched) });
+  }
+  startJob(id);
+  return NextResponse.json({ job: toPublicJob(job) });
 }
