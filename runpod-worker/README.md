@@ -7,7 +7,7 @@ It also **always 2× the short side**. A 2160×3840 clip becomes resolution 4320
 This wrap:
 
 1. Lets the Hub handler run as usual (ComfyUI output stays scratch on the GPU box / network volume).
-2. Caps short side at 2160, tiles the VAE (256–512), drops batch size, and swaps DiT blocks so 4K sources enhance in place instead of trying 8K.
+2. Caps short side at 2160, tiles the VAE (256–512), drops batch size, and swaps DiT blocks so 4K sources enhance in place instead of trying 8K. SeedVR2 still encodes **every frame of the clip it is given** in Phase 1, so a 4K IMAGE tensor would blow 24 GB; the wrap splits 4K (and 1440p-out) sources into 5- or 9-frame overlapping windows, runs the Hub graph on each, then stitches. Same 7B sharp checkpoint — no bigger GPU and no other Hub image.
 3. Honors `job.input.resolution` from the app (HFR / source-size jobs no longer get an unwanted 2×).
 4. When `scale_changed` is false (fps-only), strips SeedVR2 from the Hub graph so RIFE interpolates the source frames instead of running a 1× “upscale”.
 5. Sets RIFE’s integer multiplier so the **requested** fps is reachable. 24→60 is always RIFE 5× (exact 60 fps timestamps), then `VHS_SelectEveryNthImage` keeps every 2nd frame so the encode is 60 fps — not ffmpeg motion-interpolation from 48. Phone-length 1080p would be ~30 GB as one 5× tensor, so the wrap splits the source into overlapping chunks (1 source-frame overlap, drop the first output frame of chunk 2+). 30→60 stays a single 2× pass. Display rotation is baked on the **source** before RIFE so motion is upright.

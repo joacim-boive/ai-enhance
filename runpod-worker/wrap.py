@@ -2,6 +2,8 @@
 
 Also patches SeedVR2 prompts so a 24 GB 4090 does not encode 8K. The Hub always
 sets resolution = min(w,h)*2; a 4K clip becomes 4320 and OOMs in Phase 1.
+4K sources stay 4K and are split into short overlapping windows so SeedVR2
+never loads the whole clip as one IMAGE tensor.
 
 Deploy this file as /handler.py after copying the original Hub handler to
 /hub_handler.py. The worker never receives R2_SECRET_ACCESS_KEY.
@@ -230,7 +232,7 @@ def _run_rife_chunks(inner, job: Any, prepared: PreparedRifeSource) -> dict[str,
         _progress(
             24 + int(62 * index / total),
             "Enhancing on GPU",
-            f"RIFE chunk {index + 1}/{total}",
+            f"GPU chunk {index + 1}/{total}",
         )
         chunk_job = copy.deepcopy(job) if isinstance(job, dict) else {"input": {}}
         chunk_input = dict(prepared.work_input)

@@ -63,7 +63,7 @@ test("gpuFailureMessage rewrites SeedVR2 device allocation OOMs", () => {
   );
   assert.match(
     gpuFailureMessage("torch.OutOfMemoryError: Allocation on device"),
-    /VRAM/,
+    /short overlapping windows/,
   );
   assert.equal(gpuFailureMessage("", "FAILED"), "GPU job failed");
   assert.match(gpuFailureMessage("", "TIMED_OUT"), /time limit/i);
