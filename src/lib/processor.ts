@@ -46,12 +46,29 @@ import {
 import { SAMPLE_PUBLIC_PATH, SAMPLE_SOURCE_PATH } from "./sample";
 import { contentTypeForName, localPathFor, saveFromPath } from "./storage";
 import { tmpPath } from "./tmp";
-import type { Engine, Job } from "./types";
+import type { Engine, Job, QueueStatus } from "./types";
 import { isHttpUrl } from "./url";
 
 const queue: string[] = [];
 let draining = false;
 const inFlight = new Set<string>();
+
+export function getQueueStatus(): QueueStatus {
+  return {
+    inFlight: Array.from(inFlight),
+    queued: [...queue],
+    draining,
+  };
+}
+
+export function removeFromQueue(id: string): boolean {
+  const index = queue.indexOf(id);
+  if (index >= 0) {
+    queue.splice(index, 1);
+    return true;
+  }
+  return false;
+}
 
 export function startJob(id: string): void {
   if (isVercel()) {
@@ -62,15 +79,19 @@ export function startJob(id: string): void {
 }
 
 export async function ensureJobRunning(id: string): Promise<void> {
-  if (inFlight.has(id)) {
+  if (inFlight.has(id) || queue.includes(id)) {
     return;
   }
   const job = await loadJob(id);
   if (!job || isTerminalJobStatus(job.status)) {
     return;
   }
-  if (jobNeedsGpuFollow(job) || jobNeedsDispatch(job)) {
+  if (jobNeedsGpuFollow(job)) {
     void processJobSafe(id);
+    return;
+  }
+  if (jobNeedsDispatch(job)) {
+    startJob(id);
   }
 }
 

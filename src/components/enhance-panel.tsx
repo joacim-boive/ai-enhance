@@ -19,6 +19,7 @@ type Props = {
   health: HealthStatus | null;
   working: boolean;
   workingLabel?: string;
+  buttonLabel?: string;
   canEnhance: boolean;
   onChange: (settings: JobSettings) => void;
   onEnhance: () => void;
@@ -30,6 +31,7 @@ export function EnhancePanel({
   health,
   working,
   workingLabel = "Working…",
+  buttonLabel = "Enhance video",
   canEnhance,
   onChange,
   onEnhance,
@@ -167,9 +169,9 @@ export function EnhancePanel({
           type="button"
           disabled={!canEnhance || working}
           onClick={onEnhance}
-          className="w-full rounded-full bg-[linear-gradient(180deg,#f3d7a8,#c48a42)] px-5 py-4 text-sm uppercase tracking-[0.22em] text-[#2a1c0a] disabled:opacity-40"
+          className="w-full rounded-full bg-[linear-gradient(180deg,#f3d7a8,#c48a42)] px-5 py-4 text-sm uppercase tracking-[0.22em] text-[#2a1c0a] disabled:opacity-40 cursor-pointer"
         >
-          {working ? workingLabel : "Enhance video"}
+          {working ? workingLabel : buttonLabel}
         </button>
         <p className="text-center text-[11px] text-[var(--muted)]">
           GPU uses SeedVR2 + RIFE 4.9 on an RTX 4090. Results above 4K show a warning; nothing above 8K is allowed.

@@ -171,15 +171,25 @@ export function subscribe(
 ): () => void {
   emitter.on(id, listener);
   const timer = setInterval(() => {
-    void loadJob(id).then((job) => {
+    void (async () => {
+      const job = await loadJob(id);
       if (job) {
         listener(job);
       }
-    });
+    })();
   }, 1000);
   return () => {
     emitter.off(id, listener);
     clearInterval(timer);
+  };
+}
+
+export function subscribeAll(
+  listener: (job: Job) => void,
+): () => void {
+  emitter.on("all", listener);
+  return () => {
+    emitter.off("all", listener);
   };
 }
 

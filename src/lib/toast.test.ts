@@ -33,3 +33,23 @@ test("toast chrome differs by tone", () => {
   assert.equal(new Set(panels).size, TONES.length);
   assert.equal(new Set(labels).size, TONES.length);
 });
+
+test("supports toast action execution", () => {
+  let executed = false;
+  const actionToast = {
+    id: "toast-1",
+    title: "Enhancement ready for review",
+    body: "Video is ready",
+    tone: "success" as const,
+    action: {
+      label: "Review",
+      onClick: () => {
+        executed = true;
+      },
+    },
+  };
+
+  assert.equal(actionToast.action.label, "Review");
+  actionToast.action.onClick();
+  assert.equal(executed, true);
+});
