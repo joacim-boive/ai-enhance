@@ -328,7 +328,7 @@ export function enhanceEngineCopy(target: {
   scaleChanged: boolean;
 }): string {
   if (target.fpsChanged && !target.scaleChanged) {
-    return "Frame interpolation runs RIFE 4.9 on the RTX 4090. SeedVR2 is skipped.";
+    return "Frame interpolation runs RIFE 4.9 on the RTX 4090 to the selected frame rate, including 24→60. SeedVR2 is skipped.";
   }
   if (target.scaleChanged && !target.fpsChanged) {
     return "Upscale runs SeedVR2 on the RTX 4090. Results above 4K show a warning; nothing above 8K is allowed.";

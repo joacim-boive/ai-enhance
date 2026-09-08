@@ -1,8 +1,15 @@
 import os
+import subprocess
 import tempfile
 import unittest
 
-from r2_put import attach_local_output, probe_video
+from r2_put import (
+    attach_local_output,
+    conform_output_fps,
+    fps_filter_value,
+    job_target_fps,
+    probe_video,
+)
 
 
 class R2PutTests(unittest.TestCase):
@@ -26,6 +33,52 @@ class R2PutTests(unittest.TestCase):
         self.assertEqual(probe.get("fps"), 30.0)
         self.assertEqual(probe.get("width"), 320)
         self.assertEqual(probe.get("height"), 240)
+
+    def test_job_target_fps_reads_fps_fields(self) -> None:
+        self.assertEqual(job_target_fps({"fps": 60}), 60.0)
+        self.assertEqual(job_target_fps({"target_fps": 59.94}), 59.94)
+        self.assertIsNone(job_target_fps({}))
+        self.assertEqual(fps_filter_value(60), "60")
+        self.assertEqual(fps_filter_value(59.94), "60000/1001")
+
+    def test_conform_output_fps_decimates_120_to_60(self) -> None:
+        src = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False).name
+        out = src
+        try:
+            subprocess.check_call(
+                [
+                    "ffmpeg",
+                    "-y",
+                    "-hide_banner",
+                    "-loglevel",
+                    "error",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "color=c=black:s=16x16:r=120:d=1",
+                    "-c:v",
+                    "libx264",
+                    "-pix_fmt",
+                    "yuv420p",
+                    src,
+                ],
+                timeout=30,
+            )
+            out = conform_output_fps(src, {"fps": 60})
+            self.assertNotEqual(out, src)
+            probe = probe_video(out)
+            self.assertEqual(probe.get("fps"), 60.0)
+            duration = float(probe.get("duration") or 0)
+            self.assertGreater(duration, 0.8)
+            self.assertLess(duration, 1.3)
+            same = conform_output_fps(out, {"fps": 60})
+            self.assertEqual(same, out)
+        except FileNotFoundError:
+            self.skipTest("ffmpeg not available")
+        finally:
+            for path in {src, out}:
+                if os.path.isfile(path):
+                    os.unlink(path)
 
 
 if __name__ == "__main__":

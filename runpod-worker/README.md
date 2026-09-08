@@ -10,9 +10,10 @@ This wrap:
 2. Caps short side at 2160, tiles the VAE (256–512), drops batch size, and swaps DiT blocks so 4K sources enhance in place instead of trying 8K.
 3. Honors `job.input.resolution` from the app (HFR / source-size jobs no longer get an unwanted 2×).
 4. When `scale_changed` is false (fps-only), strips SeedVR2 from the Hub graph so RIFE interpolates the source frames instead of running a 1× “upscale”.
-5. Waits for ComfyUI over HTTP history if the Hub websocket drops, so interpolation jobs are not marked GPU-unavailable.
-6. Streams the mp4 to the **presigned** `upload_url` the app minted for `users/{userId}/jobs/{jobId}/output.mp4`.
-7. Returns `{ object_key, byte_size, etag }` only. No bytes go back through RunPod or Next.js.
+5. Sets RIFE’s integer multiplier so the **requested** fps is reachable. 24→60 is 2.5×, so RIFE runs 5× (timesteps 0.2/0.4/0.6/0.8) and the wrap keeps every 2nd frame — those are the exact 60 fps samples — then encodes **once** at 60. No second H.264 generation. 30→60 stays a single 2× pass.
+6. Waits for ComfyUI over HTTP history if the Hub websocket drops, so interpolation jobs are not marked GPU-unavailable.
+7. Streams the mp4 to the **presigned** `upload_url` the app minted for `users/{userId}/jobs/{jobId}/output.mp4`.
+8. Returns `{ object_key, byte_size, etag }` only. No bytes go back through RunPod or Next.js.
 
 The studio app does **not** fall back to Vercel CPU interpolation when a GPU job fails. Retry the GPU job instead.
 
