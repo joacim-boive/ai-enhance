@@ -6,9 +6,13 @@ import unittest
 from r2_put import (
     attach_local_output,
     conform_output_fps,
+    conform_output_rotation,
     fps_filter_value,
     job_target_fps,
+    normalize_rotation,
+    output_needs_rotation,
     probe_video,
+    transpose_filter,
 )
 
 
@@ -73,6 +77,52 @@ class R2PutTests(unittest.TestCase):
             self.assertLess(duration, 1.3)
             same = conform_output_fps(out, {"fps": 60})
             self.assertEqual(same, out)
+        except FileNotFoundError:
+            self.skipTest("ffmpeg not available")
+        finally:
+            for path in {src, out}:
+                if os.path.isfile(path):
+                    os.unlink(path)
+
+    def test_rotation_helpers_detect_coded_landscape(self) -> None:
+        self.assertEqual(normalize_rotation(-90), 270)
+        self.assertEqual(transpose_filter(90), "transpose=1")
+        self.assertEqual(transpose_filter(270), "transpose=2")
+        self.assertIsNone(transpose_filter(0))
+        self.assertTrue(output_needs_rotation(3840, 2160, 90))
+        self.assertFalse(output_needs_rotation(2160, 3840, 90))
+        self.assertFalse(output_needs_rotation(3840, 2160, 0))
+
+    def test_conform_output_rotation_transposes_landscape_master(self) -> None:
+        src = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False).name
+        out = src
+        try:
+            subprocess.check_call(
+                [
+                    "ffmpeg",
+                    "-y",
+                    "-hide_banner",
+                    "-loglevel",
+                    "error",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "color=c=red:s=32x16:r=24:d=1",
+                    "-c:v",
+                    "libx264",
+                    "-pix_fmt",
+                    "yuv420p",
+                    src,
+                ],
+                timeout=30,
+            )
+            same = conform_output_rotation(src, {"rotation": 0})
+            self.assertEqual(same, src)
+            out = conform_output_rotation(src, {"rotation": 90})
+            self.assertNotEqual(out, src)
+            probe = probe_video(out)
+            self.assertEqual(probe.get("width"), 16)
+            self.assertEqual(probe.get("height"), 32)
         except FileNotFoundError:
             self.skipTest("ffmpeg not available")
         finally:

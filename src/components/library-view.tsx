@@ -251,7 +251,7 @@ function FamilyCard({ family, onOpen, onDelete, deleting }: FamilyCardProps) {
   );
 
   const effectiveRatio = useMemo(() => {
-    return aspectRatioForMeta(meta, calculatedRatio ?? "16 / 9");
+    return calculatedRatio ?? aspectRatioForMeta(meta, "16 / 9");
   }, [meta, calculatedRatio]);
 
   return (
@@ -281,7 +281,7 @@ function FamilyCard({ family, onOpen, onDelete, deleting }: FamilyCardProps) {
             className="h-full w-full object-contain"
             onLoad={(event) => {
               const img = event.currentTarget;
-              if (!meta?.width && img.naturalWidth && img.naturalHeight) {
+              if (img.naturalWidth && img.naturalHeight) {
                 setCalculatedRatio(`${img.naturalWidth} / ${img.naturalHeight}`);
               }
             }}
@@ -299,7 +299,7 @@ function FamilyCard({ family, onOpen, onDelete, deleting }: FamilyCardProps) {
             className={`h-full w-full object-contain ${thumbnail ? "absolute inset-0" : ""}`}
             onLoadedMetadata={(event) => {
               const video = event.currentTarget;
-              if (!meta?.width && video.videoWidth && video.videoHeight) {
+              if (video.videoWidth && video.videoHeight) {
                 setCalculatedRatio(`${video.videoWidth} / ${video.videoHeight}`);
               }
             }}
@@ -313,7 +313,7 @@ function FamilyCard({ family, onOpen, onDelete, deleting }: FamilyCardProps) {
             className="h-full w-full object-contain"
             onLoadedMetadata={(event) => {
               const video = event.currentTarget;
-              if (!meta?.width && video.videoWidth && video.videoHeight) {
+              if (video.videoWidth && video.videoHeight) {
                 setCalculatedRatio(`${video.videoWidth} / ${video.videoHeight}`);
               }
             }}

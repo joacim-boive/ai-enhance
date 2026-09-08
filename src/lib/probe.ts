@@ -3,7 +3,7 @@ import { mkdir, readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { ffmpegBin, ffprobeBin } from "./binaries";
 import { isVercel, r2Enabled } from "./env";
-import { parseFrameRate } from "./format";
+import { displaySize, parseFrameRate, rotationFromProbe, transposeFilter } from "./format";
 import { jobThumbKey, mediaJobThumbUrl, mediaUploadThumbUrl, uploadThumbKey } from "./keys";
 import { putBytesToR2 } from "./r2";
 import { saveBytes } from "./storage";
@@ -20,6 +20,8 @@ type FfprobeStream = {
   nb_frames?: string;
   duration?: string;
   pix_fmt?: string;
+  tags?: { rotate?: string };
+  side_data_list?: { rotation?: number | string; side_data_type?: string }[];
 };
 
 type FfprobeFormat = {
@@ -74,9 +76,11 @@ export async function probeVideo(filePath: string): Promise<VideoMeta> {
     parseFrameRate(video.avg_frame_rate) || parseFrameRate(video.r_frame_rate) || 24;
   const durationSec = Number(video.duration || parsed.format?.duration || 0);
   const frameCount = video.nb_frames ? Number(video.nb_frames) : null;
+  const rotation = rotationFromProbe(video);
+  const size = displaySize(video.width, video.height, rotation);
   return {
-    width: video.width,
-    height: video.height,
+    width: size.width,
+    height: size.height,
     fps,
     durationSec: Number.isFinite(durationSec) ? durationSec : 0,
     videoCodec: video.codec_name ?? "unknown",
@@ -84,6 +88,7 @@ export async function probeVideo(filePath: string): Promise<VideoMeta> {
     sizeBytes: Number(parsed.format?.size || 0),
     frameCount: frameCount && Number.isFinite(frameCount) ? frameCount : null,
     pixelFormat: video.pix_fmt ?? null,
+    rotation,
   };
 }
 
@@ -92,19 +97,22 @@ export async function extractThumbnails(
   jobId: string,
   count = 8,
   durationSec = 3,
-  options?: { userId?: string; kind?: "job" | "upload" },
+  options?: { userId?: string; kind?: "job" | "upload"; rotation?: number },
 ): Promise<string[]> {
   const dir = tmpPath(`thumbs-${jobId}`);
   await mkdir(dir, { recursive: true });
   const pattern = path.join(dir, "frame-%02d.jpg");
   const span = Math.max(durationSec, 1);
+  const rotate = transposeFilter(options?.rotation ?? 0);
+  const vf = [rotate, `fps=${count}/${span}`, "scale=240:-2"].filter(Boolean).join(",");
   try {
     await run(ffmpegBin(), [
       "-y",
+      "-noautorotate",
       "-i",
       filePath,
       "-vf",
-      `fps=${count}/${span},scale=240:-2`,
+      vf,
       "-frames:v",
       String(count),
       "-q:v",

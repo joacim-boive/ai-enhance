@@ -53,6 +53,20 @@ test("cinema 4k fits 720p into 3840x2160", () => {
   assert.equal(target.height, 2160);
 });
 
+test("named resolutions fit portrait sources to the UHD box, not a landscape box", () => {
+  const portrait: VideoMeta = { ...meta, width: 1080, height: 1920 };
+  const cinema = resolveOutputTarget(portrait, settingsFromPreset("cinema"));
+  assert.equal(cinema.width, 2160);
+  assert.equal(cinema.height, 3840);
+  const small: VideoMeta = { ...meta, width: 720, height: 1280 };
+  const hd = resolveOutputTarget(small, withCustomOverride(DEFAULT_SETTINGS, { scale: "1080p" }));
+  assert.equal(hd.width, 1080);
+  assert.equal(hd.height, 1920);
+  const native = resolveOutputTarget(portrait, DEFAULT_SETTINGS);
+  assert.equal(native.width, 1080);
+  assert.equal(native.height, 1920);
+});
+
 test("explicit GPU preference always uses the 4090 when configured", () => {
   assert.equal(
     preferGpuEngine({

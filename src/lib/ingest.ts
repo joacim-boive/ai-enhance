@@ -95,6 +95,7 @@ async function finalizeIngest(input: {
   const thumbs = await extractThumbnails(input.probeSource, input.id, 8, meta.durationSec, {
     userId: input.userId,
     kind: "upload",
+    rotation: meta.rotation,
   });
   const record: StoredFile = {
     id: input.id,

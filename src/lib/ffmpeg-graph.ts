@@ -1,3 +1,5 @@
+import { transposeFilter } from "./format";
+
 export type GraphInput = {
   width: number;
   height: number;
@@ -7,10 +9,15 @@ export type GraphInput = {
   denoise: boolean;
   sharpen: boolean;
   quality: "high" | "fast";
+  rotation?: number;
 };
 
 export function buildVideoFilters(input: GraphInput): string {
   const filters: string[] = [];
+  const rotate = transposeFilter(input.rotation ?? 0);
+  if (rotate) {
+    filters.push(rotate);
+  }
   if (input.denoise) {
     filters.push(input.quality === "high" ? "hqdn3d=1.2:1.2:6:6" : "hqdn3d=0.8:0.8:3:3");
   }
@@ -57,7 +64,7 @@ export function ffmpegArgs(options: {
       "2",
     );
   }
-  args.push("-fflags", "+genpts", "-i", options.inputPath, "-map", "0:v:0");
+  args.push("-fflags", "+genpts", "-noautorotate", "-i", options.inputPath, "-map", "0:v:0");
   if (options.filters) {
     args.push("-vf", options.filters);
   }

@@ -51,6 +51,7 @@ export async function enhanceVideo(input: EnhanceVideoInput): Promise<void> {
     denoise: input.settings.denoise,
     sharpen: input.settings.sharpen,
     quality: input.quality,
+    rotation: input.meta.rotation,
   });
   const args = ffmpegArgs({
     inputPath: input.inputPath,

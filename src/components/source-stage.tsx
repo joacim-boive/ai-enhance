@@ -9,6 +9,7 @@ import {
   formatResolution,
 } from "@/lib/format";
 import type { BenchSource } from "@/lib/types";
+import { MediaFrame } from "./media-frame";
 
 type Props = {
   file: BenchSource;
@@ -20,17 +21,14 @@ export function SourceStage({ file, onClear }: Props) {
   const aspect = aspectRatioForMeta(meta);
   return (
     <div className="panel overflow-hidden rounded-[28px]">
-      <div
-        className="relative flex max-h-[75vh] w-full items-center justify-center overflow-hidden bg-black"
-        style={{ aspectRatio: aspect }}
-      >
+      <MediaFrame aspect={aspect} className="flex w-full items-center justify-center">
         <video
           src={file.url}
           controls
           className="h-full w-full object-contain"
           playsInline
         />
-      </div>
+      </MediaFrame>
       <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[var(--line)] px-5 py-4">
         <div>
           <p className="text-xs uppercase tracking-[0.18em] text-[var(--gold)]">

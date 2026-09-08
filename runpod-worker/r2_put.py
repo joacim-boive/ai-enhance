@@ -37,6 +37,7 @@ def upload_master(job_input: dict[str, Any], output: Any) -> dict[str, Any]:
         raise RuntimeError("GPU finished but no mp4 was found to upload.")
 
     path = conform_output_fps(path, job_input)
+    path = conform_output_rotation(path, job_input)
     size = os.path.getsize(path)
     probe = probe_video(path)
     content_type = str(job_input.get("content_type") or "video/mp4")
@@ -114,6 +115,7 @@ def attach_local_output(output: Any, job_input: dict[str, Any] | None = None) ->
         return result
     if job_input:
         path = conform_output_fps(path, job_input)
+        path = conform_output_rotation(path, job_input)
         result["video_path"] = path
     probe = probe_video(path)
     if probe:
@@ -154,6 +156,98 @@ def fps_filter_value(fps: float) -> str:
     if abs(fps - rounded) < 0.02:
         return str(int(rounded))
     return f"{fps:.3f}".rstrip("0").rstrip(".")
+
+
+def normalize_rotation(value: Any) -> int:
+    if isinstance(value, bool) or value is None:
+        return 0
+    try:
+        degrees = int(round(float(value)))
+    except (TypeError, ValueError):
+        return 0
+    return degrees % 360
+
+
+def transpose_filter(rotation: int) -> str | None:
+    turns = normalize_rotation(rotation)
+    if turns == 90:
+        return "transpose=1"
+    if turns == 180:
+        return "hflip,vflip"
+    if turns == 270:
+        return "transpose=2"
+    return None
+
+
+def output_needs_rotation(width: Any, height: Any, rotation: int) -> bool:
+    if not isinstance(width, (int, float)) or not isinstance(height, (int, float)):
+        return False
+    if width <= 0 or height <= 0:
+        return False
+    turns = normalize_rotation(rotation)
+    if turns not in (90, 270):
+        return False
+    # Phone clips are coded landscape and displayed portrait. If the GPU left
+    # the coded orientation, the master is still wider than it is tall.
+    return width >= height
+
+
+def conform_output_rotation(path: str, job_input: dict[str, Any] | None) -> str:
+    """Bake display rotation so a 9:16 source is not left as coded 16:9."""
+    if not job_input:
+        return path
+    rotation = normalize_rotation(job_input.get("rotation"))
+    vf = transpose_filter(rotation)
+    if vf is None:
+        return path
+    probe = probe_video(path)
+    if not output_needs_rotation(probe.get("width"), probe.get("height"), rotation):
+        return path
+    dest = _rotated_path(path, rotation)
+    _ffmpeg_rotate(path, dest, vf)
+    print(f"Lumen wrap: rotated output {rotation} deg for display", flush=True)
+    return dest
+
+
+def _rotated_path(path: str, rotation: int) -> str:
+    directory, name = os.path.split(path)
+    stem, ext = os.path.splitext(name)
+    return os.path.join(directory or tempfile.gettempdir(), f"{stem}-rot{rotation}{ext or '.mp4'}")
+
+
+def _ffmpeg_rotate(src: str, dest: str, vf: str) -> None:
+    common = [
+        "ffmpeg",
+        "-y",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-noautorotate",
+        "-i",
+        src,
+        "-map",
+        "0:v:0",
+        "-map",
+        "0:a:0?",
+        "-vf",
+        vf,
+        "-c:v",
+        "libx264",
+        "-preset",
+        "fast",
+        "-crf",
+        "16",
+        "-pix_fmt",
+        "yuv420p",
+        "-movflags",
+        "+faststart",
+    ]
+    try:
+        subprocess.check_call(common + ["-c:a", "copy", dest], timeout=3600)
+        return
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        pass
+    subprocess.check_call(common + ["-c:a", "aac", "-b:a", "192k", dest], timeout=3600)
 
 
 def conform_output_fps(path: str, job_input: dict[str, Any] | None) -> str:
