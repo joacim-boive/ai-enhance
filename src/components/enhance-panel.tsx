@@ -178,7 +178,10 @@ export function EnhancePanel({
           {working ? workingLabel : buttonLabel}
         </button>
         <p className="text-center text-[11px] text-[var(--muted)]">
-          {enhanceEngineCopy(target)}
+          {enhanceEngineCopy({
+            fpsChanged: target?.fpsChanged ?? settings.fps !== "keep",
+            scaleChanged: target?.scaleChanged ?? settings.scale !== "none",
+          })}
         </p>
       </div>
     </aside>

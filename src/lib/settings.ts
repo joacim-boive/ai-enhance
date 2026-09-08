@@ -326,14 +326,14 @@ export function gpuEngineLabel(settings?: JobSettings | null): string {
 export function enhanceEngineCopy(target: {
   fpsChanged: boolean;
   scaleChanged: boolean;
-} | null): string {
-  if (target?.fpsChanged && !target.scaleChanged) {
+}): string {
+  if (target.fpsChanged && !target.scaleChanged) {
     return "Frame interpolation runs RIFE 4.9 on the RTX 4090. SeedVR2 is skipped.";
   }
-  if (target?.scaleChanged && !target.fpsChanged) {
+  if (target.scaleChanged && !target.fpsChanged) {
     return "Upscale runs SeedVR2 on the RTX 4090. Results above 4K show a warning; nothing above 8K is allowed.";
   }
-  if (target?.fpsChanged && target.scaleChanged) {
+  if (target.fpsChanged && target.scaleChanged) {
     return "GPU uses SeedVR2 then RIFE 4.9 on an RTX 4090. Results above 4K show a warning; nothing above 8K is allowed.";
   }
   return "GPU uses SeedVR2 + RIFE 4.9 on an RTX 4090. Results above 4K show a warning; nothing above 8K is allowed.";
