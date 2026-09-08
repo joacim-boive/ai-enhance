@@ -34,15 +34,22 @@ type RunpodStatusResponse = {
   error?: string;
 };
 
-type RunpodHealth = {
-  workers?: {
-    idle?: number;
-    running?: number;
-    initializing?: number;
-    throttled?: number;
-    ready?: number;
-  };
-};
+export function gpuShouldAlert(input: {
+  configured: boolean;
+  r2Ready: boolean;
+  reachable: boolean;
+  httpOk: boolean;
+  ready: boolean;
+  throttled: number;
+}): boolean {
+  if (!input.configured) {
+    return false;
+  }
+  if (!input.r2Ready || !input.reachable || !input.httpOk) {
+    return true;
+  }
+  return input.throttled > 0 && !input.ready;
+}
 
 export async function gpuHealth(): Promise<HealthStatus["gpu"]> {
   const { apiKey, endpointId } = runpodConfig();
@@ -51,60 +58,24 @@ export async function gpuHealth(): Promise<HealthStatus["gpu"]> {
       configured: false,
       endpointId: null,
       ready: false,
+      alert: false,
       workers: null,
       message: missingGpuKeyMessage(),
     };
   }
-  try {
-    const response = await fetch(`https://api.runpod.ai/v2/${endpointId}/health`, {
-      headers: { Authorization: `Bearer ${apiKey}` },
-      cache: "no-store",
-    });
-    if (!response.ok) {
-      return {
-        configured: true,
-        endpointId,
-        ready: false,
-        workers: null,
-        message: `GPU endpoint returned ${response.status}. Jobs will fall back to CPU.`,
-      };
-    }
-    const data = (await response.json()) as RunpodHealth;
-    const workers = {
-      idle: data.workers?.idle ?? 0,
-      running: data.workers?.running ?? 0,
-      initializing: data.workers?.initializing ?? 0,
-      throttled: data.workers?.throttled ?? 0,
-    };
-    const ready = workers.idle + workers.running > 0;
-    let message = "GPU is cold. The first job warms a worker, then runs SeedVR2 + RIFE.";
-    if (!r2Enabled()) {
-      message =
-        "GPU is configured, but Cloudflare R2 is missing. The worker cannot land a private master without a presigned upload.";
-    } else if (ready) {
-      message = "GPU workers are available.";
-    } else if (workers.initializing > 0) {
-      message =
-        "GPU worker is starting. The Hub image is pulling onto an RTX 4090 — first boot can take several minutes.";
-    } else if (workers.throttled > 0) {
-      message = "GPU capacity is throttled. Jobs will wait or fall back to CPU.";
-    }
-    return {
-      configured: true,
-      endpointId,
-      ready: r2Enabled() ? ready : false,
-      workers,
-      message,
-    };
-  } catch {
-    return {
-      configured: true,
-      endpointId,
-      ready: false,
-      workers: null,
-      message: "Could not reach Runpod. CPU fallback will be used.",
-    };
-  }
+  const r2Ready = r2Enabled();
+  // Do not GET Runpod /health from the studio poll. That ping can reset
+  // idle timeout and leave a 4090 billed after a job (or a config change).
+  return {
+    configured: true,
+    endpointId,
+    ready: false,
+    alert: !r2Ready,
+    workers: null,
+    message: r2Ready
+      ? "GPU is on demand. The first enhance job warms an RTX 4090."
+      : "GPU is configured, but Cloudflare R2 is missing. The worker cannot land a private master without a presigned upload.",
+  };
 }
 
 function taskTypeFor(scaleChanged: boolean, fpsChanged: boolean): "upscale" | "upscale_and_interpolation" {
@@ -139,6 +110,7 @@ export async function submitGpuJob(input: {
   multipart: GpuMultipartGrant;
   scaleChanged: boolean;
   fpsChanged: boolean;
+  resolution: number;
 }): Promise<string> {
   const { apiKey, endpointId } = runpodConfig();
   if (!apiKey) {
@@ -151,6 +123,7 @@ export async function submitGpuJob(input: {
     upload_url: input.uploadUrl,
     object_key: input.objectKey,
     content_type: input.contentType,
+    resolution: input.resolution,
     multipart: {
       uploadId: input.multipart.uploadId,
       partSize: input.multipart.partSize,
@@ -202,6 +175,10 @@ export async function pollGpuJob(
   while (!signal.aborted) {
     const data = await getGpuJobStatus(jobId);
     if (data.status === "COMPLETED") {
+      const completedError = gpuOutputError(data.output);
+      if (completedError) {
+        throw new Error(gpuFailureMessage(completedError));
+      }
       return data.output;
     }
     if (
@@ -209,7 +186,7 @@ export async function pollGpuJob(
       data.status === "CANCELLED" ||
       data.status === "TIMED_OUT"
     ) {
-      throw new Error(data.error || `GPU job ${data.status.toLowerCase()}`);
+      throw new Error(gpuFailureMessage(collectGpuErrorText(data), data.status));
     }
     if (
       (data.status === "IN_QUEUE" || !data.status) &&
@@ -298,6 +275,46 @@ export function gpuOutputLooksLikeBytes(output: unknown): boolean {
   }
   const video = nested.video ?? nested.video_base64 ?? nested.data;
   return typeof video === "string" && video.length > 32;
+}
+
+export function gpuOutputError(output: unknown): string | null {
+  const nested = nestedRecord(output);
+  if (!nested || typeof nested.error !== "string" || nested.error.length === 0) {
+    return null;
+  }
+  return nested.error;
+}
+
+export function isGpuOom(text: string): boolean {
+  return /allocation on device|out of memory|cuda oom|cudnn_status_alloc_failed/i.test(
+    text,
+  );
+}
+
+export function gpuFailureMessage(text: string, status?: string): string {
+  if (isGpuOom(text)) {
+    return "GPU ran out of VRAM during SeedVR2 encoding (Allocation on device). 4K clips stay at 4K on the RTX 4090; try CPU if this keeps happening.";
+  }
+  const trimmed = text.trim();
+  if (trimmed.length > 0) {
+    return trimmed;
+  }
+  return `GPU job ${(status ?? "failed").toLowerCase()}`;
+}
+
+function collectGpuErrorText(data: RunpodStatusResponse): string {
+  const chunks: string[] = [];
+  if (typeof data.error === "string" && data.error.length > 0) {
+    chunks.push(data.error);
+  }
+  const nestedError = gpuOutputError(data.output);
+  if (nestedError) {
+    chunks.push(nestedError);
+  }
+  if (typeof data.output === "string" && data.output.length > 0) {
+    chunks.push(data.output);
+  }
+  return chunks.join("\n");
 }
 
 function sleep(ms: number, signal: AbortSignal): Promise<void> {

@@ -105,6 +105,7 @@ export type HealthStatus = {
     configured: boolean;
     endpointId: string | null;
     ready: boolean;
+    alert: boolean;
     workers: {
       idle: number;
       running: number;

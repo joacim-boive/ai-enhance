@@ -88,7 +88,7 @@ export function StudioApp() {
         body: job.error ?? "Try retrying, or switch the engine to CPU.",
       });
     }
-    if (job.fallbackReason && job.engine === "cpu") {
+    if (job.fallbackReason && job.engine === "cpu" && job.status !== "complete") {
       pushToast({
         tone: "warn",
         title: "Switched to CPU fallback",
@@ -330,11 +330,6 @@ export function StudioApp() {
   return (
     <div className="relative mx-auto min-h-screen w-full max-w-[1440px] px-5 pb-20 pt-6 md:px-8">
       <AppHeader health={health} />
-      {health && !health.gpu.configured ? (
-        <div className="mb-6 rounded-2xl border border-[var(--gold)]/40 bg-[rgba(226,181,122,0.08)] px-4 py-3 text-sm leading-6 text-[var(--gold)]">
-          {health.gpu.message}
-        </div>
-      ) : null}
       {health?.hosting === "vercel" && !health.r2?.configured ? (
         <div className="mb-6 rounded-2xl border border-[var(--gold)]/40 bg-[rgba(226,181,122,0.08)] px-4 py-3 text-sm leading-6 text-[var(--gold)]">
           Cloudflare R2 is unset on this deployment. Private GB masters cannot land until

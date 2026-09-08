@@ -57,6 +57,11 @@ export function even(value: number): number {
   return rounded % 2 === 0 ? rounded : rounded + 1;
 }
 
+export function evenFloor(value: number): number {
+  const floored = Math.max(2, Math.floor(value));
+  return floored % 2 === 0 ? floored : floored - 1;
+}
+
 export function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
