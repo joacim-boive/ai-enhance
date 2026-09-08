@@ -46,16 +46,16 @@ export function EngineBadge({ health }: Props) {
     );
   }
   const gpu = resolved.gpu;
-  const gpuTone = gpu.configured
-    ? gpu.ready
+  const gpuTone = gpu.alert
+    ? "text-[var(--gold)]"
+    : gpu.configured
       ? "text-[var(--teal)]"
-      : "text-[var(--gold)]"
-    : "text-[var(--muted)]";
+      : "text-[var(--muted)]";
   const gpuLabel = !gpu.configured
     ? "GPU unset"
-    : gpu.ready
-      ? "GPU ready"
-      : "GPU cold";
+    : gpu.alert
+      ? "GPU issue"
+      : "GPU set";
   const cpuLabel = resolved.ffmpeg.ok ? "CPU ready" : "CPU missing";
   const r2Ready = Boolean(resolved.r2?.configured && resolved.session?.configured);
   const storageLabel = r2Ready

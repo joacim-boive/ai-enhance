@@ -65,7 +65,7 @@ export function JobRail({ job, onCancel, onRetry }: Props) {
         />
       </div>
 
-      {job.fallbackReason ? (
+      {job.fallbackReason && active ? (
         <p className="mt-4 rounded-2xl border border-[rgba(232,195,106,0.3)] bg-[rgba(232,195,106,0.08)] px-4 py-3 text-sm text-[var(--warn)]">
           Fell back after {job.fallbackReason}
         </p>

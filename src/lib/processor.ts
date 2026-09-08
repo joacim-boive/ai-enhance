@@ -34,7 +34,14 @@ import {
   pollGpuJob,
   submitGpuJob,
 } from "./runpod";
-import { isNoOp, preferGpuEngine, resolveOutputTarget } from "./settings";
+import {
+  gpuHubResolution,
+  isNoOp,
+  outputSizeNotice,
+  preferGpuEngine,
+  resolveOutputTarget,
+  type OutputTarget,
+} from "./settings";
 import { SAMPLE_PUBLIC_PATH, SAMPLE_SOURCE_PATH } from "./sample";
 import { contentTypeForName, localPathFor, saveFromPath } from "./storage";
 import { tmpPath } from "./tmp";
@@ -142,6 +149,15 @@ async function processJob(id: string): Promise<void> {
   }
 
   const target = resolveOutputTarget(meta, job.settings);
+  const sizeNotice = outputSizeNotice(target);
+  if (sizeNotice) {
+    await appendEvent(id, {
+      stage: "Reading source",
+      message: sizeNotice.message,
+      progress: 6,
+      level: "warn",
+    });
+  }
   const preferGpu = preferGpuEngine({
     enginePreference: job.settings.enginePreference,
     gpuConfigured: isGpuConfigured() && r2Enabled(),
@@ -170,7 +186,9 @@ async function processJob(id: string): Promise<void> {
       fallbackReason = reason;
       await appendEvent(id, {
         stage: "Fallback",
-        message: `GPU unavailable (${reason}). Switching to high-quality CPU interpolation.`,
+        message: reason.includes("VRAM")
+          ? `${reason} Switching to high-quality CPU interpolation.`
+          : `GPU unavailable (${reason}). Switching to high-quality CPU interpolation.`,
         progress: job.progress,
         level: "warn",
       });
@@ -282,14 +300,16 @@ export async function submitGpuIfReady(job: Job): Promise<Job> {
   }
 }
 
-async function dispatchGpu(
-  job: Job,
-  target: { scaleChanged: boolean; fpsChanged: boolean },
-): Promise<string> {
+async function dispatchGpu(job: Job, target: OutputTarget): Promise<string> {
   const existing = await loadJob(job.id);
   if (existing?.runpodJobId) {
     return existing.runpodJobId;
   }
+  const meta = existing?.sourceMeta ?? job.sourceMeta;
+  if (!meta) {
+    throw new Error("Missing source metadata");
+  }
+  const hub = gpuHubResolution(meta, target);
   await patchJob(job.id, {
     status: "warming",
     engine: "gpu",
@@ -299,7 +319,9 @@ async function dispatchGpu(
   });
   await appendEvent(job.id, {
     stage: "Warming GPU",
-    message: "Submitting to the SeedVR2 / RIFE worker on RTX 4090. First boot can take a few minutes.",
+    message: hub.capped
+      ? `Submitting to the RTX 4090. SeedVR2 short side is ${hub.resolution}px (the stock Hub would ask for ${hub.hubDefault}px and run out of VRAM).`
+      : "Submitting to the SeedVR2 / RIFE worker on RTX 4090. First boot can take a few minutes.",
     progress: 8,
     level: "info",
   });
@@ -323,6 +345,7 @@ async function dispatchGpu(
     multipart: grant.multipart,
     scaleChanged: target.scaleChanged,
     fpsChanged: target.fpsChanged,
+    resolution: hub.resolution,
   });
   await patchJob(job.id, { runpodJobId, status: "processing", stage: "Enhancing on GPU" });
   await appendEvent(job.id, {
@@ -337,7 +360,7 @@ async function dispatchGpu(
 async function runGpu(
   job: Job,
   signal: AbortSignal,
-  target: { scaleChanged: boolean; fpsChanged: boolean },
+  target: OutputTarget,
 ): Promise<Engine> {
   if (!r2Enabled()) {
     throw new Error("Cloudflare R2 is required so the GPU worker can upload a private master.");

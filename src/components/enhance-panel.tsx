@@ -5,7 +5,9 @@ import {
   FPS_OPTIONS,
   PRESETS,
   SCALE_OPTIONS,
+  outputSizeNotice,
   resolveOutputTarget,
+  scaleExceeds8k,
   settingsFromPreset,
   withCustomOverride,
 } from "@/lib/settings";
@@ -33,6 +35,7 @@ export function EnhancePanel({
   onEnhance,
 }: Props) {
   const target = meta ? resolveOutputTarget(meta, settings) : null;
+  const sizeNotice = target ? outputSizeNotice(target) : null;
   const engines: { id: EnginePreference; label: string }[] = [
     { id: "auto", label: "Auto" },
     { id: "gpu", label: "GPU" },
@@ -67,14 +70,22 @@ export function EnhancePanel({
       <div className="mt-6">
         <p className="text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Resolution</p>
         <div className="mt-2 flex flex-wrap gap-2">
-          {SCALE_OPTIONS.map((option) => (
-            <Chip
-              key={option.id}
-              active={settings.scale === option.id}
-              label={option.label}
-              onClick={() => onChange(withCustomOverride(settings, { scale: option.id }))}
-            />
-          ))}
+          {SCALE_OPTIONS.map((option) => {
+            const over8k =
+              meta !== null &&
+              (option.id === "2x" || option.id === "4x") &&
+              scaleExceeds8k(meta, option.id);
+            return (
+              <Chip
+                key={option.id}
+                active={settings.scale === option.id}
+                disabled={over8k}
+                label={option.label}
+                title={over8k ? "Would exceed 8K. That size is not allowed." : undefined}
+                onClick={() => onChange(withCustomOverride(settings, { scale: option.id }))}
+              />
+            );
+          })}
         </div>
       </div>
 
@@ -125,12 +136,12 @@ export function EnhancePanel({
             />
           ))}
         </div>
-        {health && !health.gpu.configured ? (
-          <p className="mt-3 text-[11px] leading-5 text-[var(--gold)]">{health.gpu.message}</p>
-        ) : health && !health.r2?.configured ? (
+        {health && !health.r2?.configured ? (
           <p className="mt-3 text-[11px] leading-5 text-[var(--gold)]">
             GPU needs private R2 so the worker can upload the master without sending bytes through Vercel.
           </p>
+        ) : health?.gpu.alert ? (
+          <p className="mt-3 text-[11px] leading-5 text-[var(--gold)]">{health.gpu.message}</p>
         ) : null}
       </div>
 
@@ -143,6 +154,15 @@ export function EnhancePanel({
           </div>
         ) : null}
 
+        {sizeNotice ? (
+          <p
+            role="status"
+            className="rounded-2xl border border-[var(--gold)]/40 bg-[rgba(226,181,122,0.08)] px-4 py-3 text-[12px] leading-5 text-[var(--warn)]"
+          >
+            {sizeNotice.message}
+          </p>
+        ) : null}
+
         <button
           type="button"
           disabled={!canEnhance || working}
@@ -152,7 +172,7 @@ export function EnhancePanel({
           {working ? workingLabel : "Enhance video"}
         </button>
         <p className="text-center text-[11px] text-[var(--muted)]">
-          GPU uses SeedVR2 + RIFE 4.9. If it cannot start, we fall back automatically.
+          GPU uses SeedVR2 + RIFE 4.9 on an RTX 4090. Results above 4K show a warning; nothing above 8K is allowed.
         </p>
       </div>
     </aside>

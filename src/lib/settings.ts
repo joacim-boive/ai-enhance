@@ -1,4 +1,4 @@
-import { even } from "./format";
+import { even, evenFloor } from "./format";
 import type {
   EnginePreference,
   FpsMode,
@@ -111,7 +111,43 @@ export type OutputTarget = {
   fps: number;
   scaleChanged: boolean;
   fpsChanged: boolean;
+  requestedWidth: number;
+  requestedHeight: number;
+  cappedAt8k: boolean;
+  exceedsUhd: boolean;
 };
+
+/** 4K UHD. Warn when the result does not fit in this box (either orientation). */
+export const UHD_LONG_SIDE = 3840;
+export const UHD_SHORT_SIDE = 2160;
+/** Hard cap. Nothing larger than 8K is allowed. */
+export const MAX_OUTPUT_LONG_SIDE = 7680;
+export const MAX_OUTPUT_SHORT_SIDE = 4320;
+
+function fitsBox(width: number, height: number, maxLong: number, maxShort: number): boolean {
+  return Math.max(width, height) <= maxLong && Math.min(width, height) <= maxShort;
+}
+
+function clampToBox(
+  width: number,
+  height: number,
+  maxLong: number,
+  maxShort: number,
+): { width: number; height: number } {
+  const scale = Math.min(maxLong / Math.max(width, height), maxShort / Math.min(width, height), 1);
+  return {
+    width: evenFloor(width * scale),
+    height: evenFloor(height * scale),
+  };
+}
+
+export function exceedsUhd(width: number, height: number): boolean {
+  return !fitsBox(width, height, UHD_LONG_SIDE, UHD_SHORT_SIDE);
+}
+
+export function exceeds8k(width: number, height: number): boolean {
+  return !fitsBox(width, height, MAX_OUTPUT_LONG_SIDE, MAX_OUTPUT_SHORT_SIDE);
+}
 
 function fitWithin(
   width: number,
@@ -125,44 +161,97 @@ function fitWithin(
   return { width: nextWidth, height: nextHeight };
 }
 
+export function requestedOutputSize(
+  meta: VideoMeta,
+  scale: ScaleMode,
+): { width: number; height: number } {
+  switch (scale) {
+    case "2x":
+      return { width: even(meta.width * 2), height: even(meta.height * 2) };
+    case "4x":
+      return { width: even(meta.width * 4), height: even(meta.height * 4) };
+    case "1080p":
+      return fitWithin(meta.width, meta.height, 1920, 1080);
+    case "1440p":
+      return fitWithin(meta.width, meta.height, 2560, 1440);
+    case "4k":
+      return fitWithin(meta.width, meta.height, 3840, 2160);
+    default:
+      return { width: even(meta.width), height: even(meta.height) };
+  }
+}
+
+export function scaleExceeds8k(meta: VideoMeta, scale: ScaleMode): boolean {
+  const requested = requestedOutputSize(meta, scale);
+  return exceeds8k(requested.width, requested.height);
+}
+
 export function resolveOutputTarget(
   meta: VideoMeta,
   settings: JobSettings,
 ): OutputTarget {
-  let width = meta.width;
-  let height = meta.height;
-
-  switch (settings.scale) {
-    case "2x":
-      width = even(meta.width * 2);
-      height = even(meta.height * 2);
-      break;
-    case "4x":
-      width = even(meta.width * 4);
-      height = even(meta.height * 4);
-      break;
-    case "1080p":
-      ({ width, height } = fitWithin(meta.width, meta.height, 1920, 1080));
-      break;
-    case "1440p":
-      ({ width, height } = fitWithin(meta.width, meta.height, 2560, 1440));
-      break;
-    case "4k":
-      ({ width, height } = fitWithin(meta.width, meta.height, 3840, 2160));
-      break;
-    default:
-      break;
-  }
+  const requested = requestedOutputSize(meta, settings.scale);
+  const capped = exceeds8k(requested.width, requested.height)
+    ? clampToBox(requested.width, requested.height, MAX_OUTPUT_LONG_SIDE, MAX_OUTPUT_SHORT_SIDE)
+    : requested;
 
   const fps =
     settings.fps === "keep" ? roundFps(meta.fps) : Number(settings.fps);
 
   return {
-    width,
-    height,
+    width: capped.width,
+    height: capped.height,
     fps,
-    scaleChanged: width !== even(meta.width) || height !== even(meta.height),
+    scaleChanged: capped.width !== even(meta.width) || capped.height !== even(meta.height),
     fpsChanged: Math.abs(fps - meta.fps) > 0.2,
+    requestedWidth: requested.width,
+    requestedHeight: requested.height,
+    cappedAt8k: exceeds8k(requested.width, requested.height),
+    exceedsUhd: exceedsUhd(capped.width, capped.height),
+  };
+}
+
+export type OutputSizeNotice = {
+  tone: "warn";
+  message: string;
+};
+
+export function outputSizeNotice(target: OutputTarget): OutputSizeNotice | null {
+  const size = `${target.width}×${target.height}`;
+  if (target.cappedAt8k) {
+    return {
+      tone: "warn",
+      message: `Capped at 8K (${size}). ${target.requestedWidth}×${target.requestedHeight} is not allowed.`,
+    };
+  }
+  if (target.exceedsUhd) {
+    return {
+      tone: "warn",
+      message: `Above 4K (${size}). 2× or 4× on UHD is easy to pick by mistake — switch to Source or 4K unless you really want 8K.`,
+    };
+  }
+  return null;
+}
+
+/** Shortest output side the RTX 4090 worker can hold after VRAM tiling. */
+export const GPU_MAX_SHORT_SIDE = 2160;
+
+export type GpuHubResolution = {
+  resolution: number;
+  hubDefault: number;
+  capped: boolean;
+};
+
+export function gpuHubResolution(meta: VideoMeta, target: OutputTarget): GpuHubResolution {
+  const hubDefault = even(Math.min(meta.width, meta.height) * 2);
+  const requested = target.scaleChanged
+    ? Math.min(target.width, target.height)
+    : Math.min(meta.width, meta.height);
+  const resolution = even(Math.max(16, Math.min(requested, GPU_MAX_SHORT_SIDE)));
+  return {
+    resolution,
+    hubDefault,
+    capped: resolution < hubDefault,
   };
 }
 
