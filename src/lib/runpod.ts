@@ -406,10 +406,30 @@ export function gpuFailureMessage(text: string, status?: string): string {
   if (extracted.length > 0) {
     return extracted;
   }
+  if (status === "TIMED_OUT") {
+    return "GPU job hit the worker time limit. Retry the job — long interpolation clips can take more than a few minutes on the RTX 4090.";
+  }
   return `GPU job ${(status ?? "failed").toLowerCase()}`;
 }
 
-function collectGpuErrorText(data: RunpodStatusResponse): string {
+export type GpuJobFollowKind = "complete" | "fail" | "wait";
+
+export function gpuJobFollowKind(
+  status: RunpodStatusResponse["status"],
+): GpuJobFollowKind {
+  if (status === "COMPLETED") {
+    return "complete";
+  }
+  if (status === "FAILED" || status === "CANCELLED" || status === "TIMED_OUT") {
+    return "fail";
+  }
+  return "wait";
+}
+
+export function collectGpuErrorText(data: {
+  error?: string;
+  output?: unknown;
+}): string {
   const chunks: string[] = [];
   if (typeof data.error === "string" && data.error.length > 0) {
     chunks.push(data.error);
