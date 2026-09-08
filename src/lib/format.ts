@@ -50,7 +50,10 @@ export function normalizeRotation(degrees: number): number {
   return ((Math.round(degrees) % 360) + 360) % 360;
 }
 
-export function rotationFromProbe(stream: ProbeRotationSource): number {
+export function rotationFromProbe(
+  stream: ProbeRotationSource,
+  container?: ProbeRotationSource,
+): number {
   const matrix = stream.side_data_list?.find((entry) => {
     if (entry.rotation === undefined || entry.rotation === "") {
       return false;
@@ -61,11 +64,13 @@ export function rotationFromProbe(stream: ProbeRotationSource): number {
     // ffprobe prints av_display_rotation_get(); ffmpeg autorotate negates it.
     return normalizeRotation(-Number(matrix.rotation));
   }
-  const tag = stream.tags?.rotate;
-  if (tag !== undefined && tag !== "") {
-    const parsed = Number(tag);
-    if (Number.isFinite(parsed)) {
-      return normalizeRotation(parsed);
+  for (const source of [stream, container]) {
+    const tag = source?.tags?.rotate;
+    if (tag !== undefined && tag !== "") {
+      const parsed = Number(tag);
+      if (Number.isFinite(parsed)) {
+        return normalizeRotation(parsed);
+      }
     }
   }
   return 0;

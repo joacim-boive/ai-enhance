@@ -131,5 +131,42 @@ class R2PutTests(unittest.TestCase):
                     os.unlink(path)
 
 
+    def test_conform_output_120fps_landscape_becomes_60fps_portrait(self) -> None:
+        src = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False).name
+        out = src
+        try:
+            subprocess.check_call(
+                [
+                    "ffmpeg",
+                    "-y",
+                    "-hide_banner",
+                    "-loglevel",
+                    "error",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "color=c=blue:s=32x16:r=120:d=1",
+                    "-c:v",
+                    "libx264",
+                    "-pix_fmt",
+                    "yuv420p",
+                    src,
+                ],
+                timeout=30,
+            )
+            out = conform_output_fps(src, {"fps": 60, "rotation": 90})
+            self.assertNotEqual(out, src)
+            probe = probe_video(out)
+            self.assertEqual(probe.get("fps"), 60.0)
+            self.assertEqual(probe.get("width"), 16)
+            self.assertEqual(probe.get("height"), 32)
+        except FileNotFoundError:
+            self.skipTest("ffmpeg not available")
+        finally:
+            for path in {src, out}:
+                if os.path.isfile(path):
+                    os.unlink(path)
+
+
 if __name__ == "__main__":
     unittest.main()

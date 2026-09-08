@@ -36,8 +36,7 @@ def upload_master(job_input: dict[str, Any], output: Any) -> dict[str, Any]:
     if path is None or not os.path.isfile(path):
         raise RuntimeError("GPU finished but no mp4 was found to upload.")
 
-    path = conform_output_fps(path, job_input)
-    path = conform_output_rotation(path, job_input)
+    path = conform_output(path, job_input)
     size = os.path.getsize(path)
     probe = probe_video(path)
     content_type = str(job_input.get("content_type") or "video/mp4")
@@ -73,9 +72,11 @@ def probe_video(path: str) -> dict[str, Any]:
                 "-select_streams",
                 "v:0",
                 "-show_entries",
-                "stream=width,height,r_frame_rate,nb_frames",
+                "stream=width,height,r_frame_rate,avg_frame_rate,nb_frames,tags",
                 "-show_entries",
-                "format=duration,size",
+                "stream_side_data",
+                "-show_entries",
+                "format=duration,size:format_tags",
                 "-of",
                 "json",
                 path,
@@ -86,7 +87,9 @@ def probe_video(path: str) -> dict[str, Any]:
         data = json.loads(raw)
         stream = (data.get("streams") or [{}])[0]
         fmt = data.get("format") or {}
-        rate = stream.get("r_frame_rate") if isinstance(stream, dict) else None
+        rate = None
+        if isinstance(stream, dict):
+            rate = stream.get("r_frame_rate") or stream.get("avg_frame_rate")
         fps = _fps_from_rate(rate if isinstance(rate, str) else None)
         info: dict[str, Any] = {
             "width": stream.get("width") if isinstance(stream, dict) else None,
@@ -114,8 +117,7 @@ def attach_local_output(output: Any, job_input: dict[str, Any] | None = None) ->
     if path is None or not os.path.isfile(path):
         return result
     if job_input:
-        path = conform_output_fps(path, job_input)
-        path = conform_output_rotation(path, job_input)
+        path = conform_output(path, job_input)
         result["video_path"] = path
     probe = probe_video(path)
     if probe:
@@ -185,6 +187,8 @@ def output_needs_rotation(width: Any, height: Any, rotation: int) -> bool:
     if width <= 0 or height <= 0:
         return False
     turns = normalize_rotation(rotation)
+    if turns == 180:
+        return True
     if turns not in (90, 270):
         return False
     # Phone clips are coded landscape and displayed portrait. If the GPU left
@@ -192,30 +196,61 @@ def output_needs_rotation(width: Any, height: Any, rotation: int) -> bool:
     return width >= height
 
 
-def conform_output_rotation(path: str, job_input: dict[str, Any] | None) -> str:
-    """Bake display rotation so a 9:16 source is not left as coded 16:9."""
+def output_needs_fps(current: Any, target: float | None) -> bool:
+    if target is None or not isinstance(current, (int, float)):
+        return False
+    return float(current) > target + 0.15
+
+
+def conform_output(path: str, job_input: dict[str, Any] | None) -> str:
+    """One ffmpeg pass: drop RIFE's extra frames (120→60) and bake 9:16 rotation."""
     if not job_input:
         return path
+    target = job_target_fps(job_input)
     rotation = normalize_rotation(job_input.get("rotation"))
-    vf = transpose_filter(rotation)
-    if vf is None:
-        return path
     probe = probe_video(path)
-    if not output_needs_rotation(probe.get("width"), probe.get("height"), rotation):
+    filters: list[str] = []
+    notes: list[str] = []
+    need_fps = output_needs_fps(probe.get("fps"), target) and target is not None
+    vf_rot = transpose_filter(rotation)
+    need_rot = bool(vf_rot and output_needs_rotation(probe.get("width"), probe.get("height"), rotation))
+    if need_fps and target is not None:
+        filters.append(f"fps={fps_filter_value(target)}")
+        notes.append(f"{float(probe.get('fps') or 0):g}→{target:g} fps")
+    if need_rot and vf_rot:
+        filters.append(vf_rot)
+        notes.append(f"rotate {rotation} deg")
+    if not filters:
         return path
-    dest = _rotated_path(path, rotation)
-    _ffmpeg_rotate(path, dest, vf)
-    print(f"Lumen wrap: rotated output {rotation} deg for display", flush=True)
+    dest = _conformed_path(path, target if need_fps else None, rotation if need_rot else 0)
+    _ffmpeg_filters(path, dest, ",".join(filters))
+    print(f"Lumen wrap: conformed output ({', '.join(notes)})", flush=True)
     return dest
 
 
-def _rotated_path(path: str, rotation: int) -> str:
+def conform_output_rotation(path: str, job_input: dict[str, Any] | None) -> str:
+    """Bake display rotation so a 9:16 source is not left as coded 16:9."""
+    return conform_output(path, job_input)
+
+
+def conform_output_fps(path: str, job_input: dict[str, Any] | None) -> str:
+    """Decimate a denser RIFE encode (e.g. 120 fps) down to the requested rate (60)."""
+    return conform_output(path, job_input)
+
+
+def _conformed_path(path: str, fps: float | None, rotation: int) -> str:
     directory, name = os.path.split(path)
     stem, ext = os.path.splitext(name)
-    return os.path.join(directory or tempfile.gettempdir(), f"{stem}-rot{rotation}{ext or '.mp4'}")
+    bits: list[str] = []
+    if fps is not None:
+        bits.append(f"{fps_filter_value(fps).replace('/', '-')}fps")
+    if rotation:
+        bits.append(f"rot{rotation}")
+    suffix = "-".join(bits) or "conform"
+    return os.path.join(directory or tempfile.gettempdir(), f"{stem}-{suffix}{ext or '.mp4'}")
 
 
-def _ffmpeg_rotate(src: str, dest: str, vf: str) -> None:
+def _ffmpeg_filters(src: str, dest: str, vf: str) -> None:
     common = [
         "ffmpeg",
         "-y",
@@ -231,65 +266,8 @@ def _ffmpeg_rotate(src: str, dest: str, vf: str) -> None:
         "0:a:0?",
         "-vf",
         vf,
-        "-c:v",
-        "libx264",
-        "-preset",
-        "fast",
-        "-crf",
-        "16",
-        "-pix_fmt",
-        "yuv420p",
-        "-movflags",
-        "+faststart",
-    ]
-    try:
-        subprocess.check_call(common + ["-c:a", "copy", dest], timeout=3600)
-        return
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        pass
-    subprocess.check_call(common + ["-c:a", "aac", "-b:a", "192k", dest], timeout=3600)
-
-
-def conform_output_fps(path: str, job_input: dict[str, Any] | None) -> str:
-    """Decimate a denser RIFE encode (e.g. 120 fps) down to the requested rate (60)."""
-    target = job_target_fps(job_input)
-    if target is None:
-        return path
-    probe = probe_video(path)
-    current = probe.get("fps")
-    if not isinstance(current, (int, float)):
-        return path
-    if float(current) <= target + 0.15:
-        return path
-    dest = _resampled_path(path, target)
-    _ffmpeg_fps(path, dest, target)
-    print(f"Lumen wrap: resampled {float(current):g} fps → {target:g} fps", flush=True)
-    return dest
-
-
-def _resampled_path(path: str, fps: float) -> str:
-    directory, name = os.path.split(path)
-    stem, ext = os.path.splitext(name)
-    label = fps_filter_value(fps).replace("/", "-")
-    return os.path.join(directory or tempfile.gettempdir(), f"{stem}-{label}fps{ext or '.mp4'}")
-
-
-def _ffmpeg_fps(src: str, dest: str, fps: float) -> None:
-    fps_arg = fps_filter_value(fps)
-    common = [
-        "ffmpeg",
-        "-y",
-        "-hide_banner",
-        "-loglevel",
-        "error",
-        "-i",
-        src,
-        "-map",
-        "0:v:0",
-        "-map",
-        "0:a:0?",
-        "-vf",
-        f"fps={fps_arg}",
+        "-metadata:s:v:0",
+        "rotate=0",
         "-c:v",
         "libx264",
         "-preset",
@@ -310,10 +288,13 @@ def _ffmpeg_fps(src: str, dest: str, fps: float) -> None:
 
 
 def _fps_from_rate(rate: str | None) -> float | None:
-    if not rate or "/" not in rate:
+    if not rate:
         return None
-    num, den = rate.split("/", 1)
     try:
+        if "/" not in rate:
+            number = float(rate)
+            return number if number > 0 else None
+        num, den = rate.split("/", 1)
         denom = float(den)
         if denom == 0:
             return None

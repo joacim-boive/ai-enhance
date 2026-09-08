@@ -18,9 +18,9 @@ DIT_TYPE = "SeedVR2LoadDiTModel"
 RIFE_TYPE = "RIFE VFI"
 VIDEO_COMPONENTS_TYPE = "GetVideoComponents"
 COMBINE_TYPE = "VHS_VideoCombine"
-DECIMATE_TYPE = "LumenDecimateImages"
 # RIFE VFI only accepts an integer multiplier. 24→60 is 2.5×, so we go 5× to 120
-# and keep every 2nd frame (exact 60 fps timestamps) before the first encode.
+# and let ffmpeg keep the 60 fps samples after encode. Custom ComfyUI nodes
+# registered in this handler process never reach the ComfyUI server.
 # Cap so 25→60 does not explode to 12×.
 MAX_RIFE_MULTIPLIER = 8
 
@@ -104,48 +104,13 @@ class RifeFpsPlan(NamedTuple):
     resample: bool
 
 
-class LumenDecimateImages:
-    """Keep every Nth RIFE frame so 120 fps timestamps become 60 fps before encode."""
-
-    @classmethod
-    def INPUT_TYPES(cls) -> dict[str, Any]:
-        return {
-            "required": {
-                "images": ("IMAGE",),
-                "every": ("INT", {"default": 2, "min": 1, "max": 64}),
-            }
-        }
-
-    RETURN_TYPES = ("IMAGE",)
-    FUNCTION = "decimate"
-    CATEGORY = "lumen"
-
-    def decimate(self, images: Any, every: int) -> tuple[Any]:
-        stride = max(1, int(every))
-        return (images[::stride],)
-
-
-def register_lumen_nodes() -> bool:
-    try:
-        import nodes as comfy_nodes
-    except Exception:
-        return False
-    mappings = getattr(comfy_nodes, "NODE_CLASS_MAPPINGS", None)
-    if not isinstance(mappings, dict):
-        return False
-    mappings[DECIMATE_TYPE] = LumenDecimateImages
-    names = getattr(comfy_nodes, "NODE_DISPLAY_NAME_MAPPINGS", None)
-    if isinstance(names, dict):
-        names[DECIMATE_TYPE] = "Lumen Decimate Images"
-    return True
-
-
 def rife_fps_plan(source_fps: float, target_fps: float) -> RifeFpsPlan:
     """Integer RIFE multiplier that can land on an exact target fps.
 
     RIFE queries independent timesteps (i/multiplier). 24→60 uses 5× so
-    0.4 and 0.8 exist; keeping every 2nd frame is those exact 60 fps
-    samples, encoded once. Snapping to 2× would yield 48 fps.
+    0.4 and 0.8 exist. Encode that 120 fps stream, then ffmpeg keeps every
+    2nd frame. Snapping to 2× would yield 48 fps. A custom ComfyUI node
+    registered in this handler never reaches the ComfyUI server.
     """
     if source_fps <= 0 or target_fps <= 0:
         return RifeFpsPlan(2, max(target_fps, 1), max(target_fps, 1), 1, False)
@@ -165,14 +130,12 @@ def rife_fps_plan(source_fps: float, target_fps: float) -> RifeFpsPlan:
         step = dense / target_fps
         nearest = round(step)
         if nearest >= 1 and abs(step - nearest) <= 0.03:
-            if nearest > 1:
-                return RifeFpsPlan(multiplier, dense, target_fps, nearest, False)
             return RifeFpsPlan(
                 multiplier,
                 dense,
                 target_fps,
-                1,
-                abs(dense - target_fps) > 0.08,
+                nearest,
+                nearest > 1 or abs(dense - target_fps) > 0.08,
             )
 
     multiplier = min(MAX_RIFE_MULTIPLIER, max(2, math.ceil(ratio - 1e-9)))
@@ -193,25 +156,6 @@ def _fps_node_value(fps: float) -> int | float:
     return round(fps, 3)
 
 
-def _rewire_rife_decimate(prompt: dict[str, Any], every: int) -> None:
-    rife_ids = {str(node_id) for node_id, node in prompt.items() if _node_type(node) == RIFE_TYPE}
-    if not rife_ids:
-        return
-    for node_id, node in list(prompt.items()):
-        if _node_type(node) != COMBINE_TYPE:
-            continue
-        inputs = _node_inputs(node)
-        images = inputs.get("images")
-        if not (isinstance(images, list) and images and str(images[0]) in rife_ids):
-            continue
-        decimate_id = f"lumen_decimate_{node_id}"
-        prompt[decimate_id] = {
-            "class_type": DECIMATE_TYPE,
-            "inputs": {"images": [str(images[0]), 0], "every": every},
-        }
-        inputs["images"] = [decimate_id, 0]
-
-
 def apply_rife_fps(prompt: dict[str, Any], job_input: dict[str, Any] | None) -> dict[str, Any]:
     if not job_input:
         return prompt
@@ -226,15 +170,10 @@ def apply_rife_fps(prompt: dict[str, Any], job_input: dict[str, Any] | None) -> 
     if source is not None and target is not None:
         plan = rife_fps_plan(source, target)
         multiplier = plan.multiplier
-        if plan.decimate > 1:
-            _rewire_rife_decimate(prompt, plan.decimate)
-            frame_rate = plan.output_fps
-            extra = f", keep 1 of every {plan.decimate} frames, encode at {plan.output_fps:g}"
-        else:
-            frame_rate = plan.rife_fps
-            extra = (
-                f", then ffmpeg resample to {plan.output_fps:g}" if plan.resample else ""
-            )
+        frame_rate = plan.rife_fps
+        extra = (
+            f", then ffmpeg to {plan.output_fps:g}" if plan.resample else ""
+        )
         print(
             f"Lumen wrap: RIFE {source:g}→{target:g} via {multiplier}× ({plan.rife_fps:g} fps){extra}",
             flush=True,
