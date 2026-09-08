@@ -30,6 +30,7 @@ import {
   cancelGpuJob,
   getGpuJobStatus,
   gpuOutputLooksLikeBytes,
+  gpuWarmupMessage,
   isGpuConfigured,
   parseGpuObjectOutput,
   pollGpuJob,
@@ -341,9 +342,13 @@ async function dispatchGpu(job: Job, target: OutputTarget): Promise<string> {
   });
   await appendEvent(job.id, {
     stage: "Warming GPU",
-    message: hub.capped
-      ? `Submitting to the RTX 4090. SeedVR2 short side is ${hub.resolution}px (the stock Hub would ask for ${hub.hubDefault}px and run out of VRAM).`
-      : "Submitting to the SeedVR2 / RIFE worker on RTX 4090. First boot can take a few minutes.",
+    message: gpuWarmupMessage({
+      scaleChanged: target.scaleChanged,
+      fpsChanged: target.fpsChanged,
+      hubCapped: hub.capped,
+      hubResolution: hub.resolution,
+      hubDefault: hub.hubDefault,
+    }),
     progress: 8,
     level: "info",
   });

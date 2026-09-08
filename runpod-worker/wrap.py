@@ -21,7 +21,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)) or "/")
 import runpod.serverless as serverless
 
 from r2_put import upload_master
-from vram import apply_cuda_alloc, cap_resolution, patch_seedvr2_prompt
+from vram import apply_cuda_alloc, cap_resolution, patch_seedvr2_prompt, should_skip_upscale
 
 apply_cuda_alloc()
 
@@ -37,7 +37,10 @@ def _current_input() -> dict[str, Any]:
 
 def _wrap_queue_prompt(original):
     def queue_prompt(prompt):
-        patched = patch_seedvr2_prompt(prompt if isinstance(prompt, dict) else {}, _current_input())
+        job_input = _current_input()
+        if should_skip_upscale(job_input):
+            print("Lumen wrap: skipping SeedVR2 (fps-only interpolation)", flush=True)
+        patched = patch_seedvr2_prompt(prompt if isinstance(prompt, dict) else {}, job_input)
         return original(patched)
 
     return queue_prompt

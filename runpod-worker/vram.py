@@ -14,6 +14,8 @@ MAX_SHORT_SIDE = 2160
 UPSCALER_TYPE = "SeedVR2VideoUpscaler"
 VAE_TYPE = "SeedVR2LoadVAEModel"
 DIT_TYPE = "SeedVR2LoadDiTModel"
+RIFE_TYPE = "RIFE VFI"
+VIDEO_COMPONENTS_TYPE = "GetVideoComponents"
 
 
 def max_short_side() -> int:
@@ -23,6 +25,30 @@ def max_short_side() -> int:
     except ValueError:
         return MAX_SHORT_SIDE
     return max(16, value)
+
+
+def _as_bool(value: Any) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"true", "1", "yes"}:
+            return True
+        if lowered in {"false", "0", "no"}:
+            return False
+    return None
+
+
+def should_skip_upscale(job_input: dict[str, Any] | None) -> bool:
+    """fps-only jobs still hit the Hub interpolation workflow, which always runs SeedVR2."""
+    if not job_input:
+        return False
+    skip = _as_bool(job_input.get("skip_upscale"))
+    if skip is True:
+        return True
+    scale_changed = _as_bool(job_input.get("scale_changed"))
+    fps_changed = _as_bool(job_input.get("fps_changed"))
+    return scale_changed is False and fps_changed is True
 
 
 def requested_resolution(job_input: dict[str, Any] | None) -> int | None:
@@ -105,10 +131,36 @@ def _resolution_from_prompt(prompt: dict[str, Any], job_input: dict[str, Any] | 
     return cap
 
 
+def bypass_seedvr2(prompt: dict[str, Any]) -> dict[str, Any]:
+    """Rewire RIFE onto the source frames and drop SeedVR2 so interpolation does not upscale."""
+    components_id: str | None = None
+    rife_ids: list[str] = []
+    drop_ids: list[str] = []
+    for node_id, node in prompt.items():
+        class_type = _node_type(node)
+        if class_type == VIDEO_COMPONENTS_TYPE:
+            components_id = str(node_id)
+        elif class_type == RIFE_TYPE:
+            rife_ids.append(str(node_id))
+        elif class_type in {UPSCALER_TYPE, VAE_TYPE, DIT_TYPE}:
+            drop_ids.append(str(node_id))
+    if not components_id or not rife_ids:
+        return prompt
+    for rife_id in rife_ids:
+        node = prompt.get(rife_id)
+        if isinstance(node, dict):
+            _node_inputs(node)["frames"] = [components_id, 0]
+    for node_id in drop_ids:
+        prompt.pop(node_id, None)
+    return prompt
+
+
 def patch_seedvr2_prompt(
     prompt: dict[str, Any],
     job_input: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    if should_skip_upscale(job_input):
+        return bypass_seedvr2(prompt)
     resolution = _resolution_from_prompt(prompt, job_input)
     profile = _vram_profile(resolution)
     for node in prompt.values():

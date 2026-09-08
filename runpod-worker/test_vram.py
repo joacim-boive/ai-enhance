@@ -1,7 +1,13 @@
 import copy
 import unittest
 
-from vram import cap_resolution, patch_seedvr2_prompt, requested_resolution
+from vram import (
+    bypass_seedvr2,
+    cap_resolution,
+    patch_seedvr2_prompt,
+    requested_resolution,
+    should_skip_upscale,
+)
 
 
 HUB_PROMPT = {
@@ -35,6 +41,20 @@ HUB_PROMPT = {
     },
 }
 
+INTERP_PROMPT = {
+    **copy.deepcopy(HUB_PROMPT),
+    "21": {"class_type": "LoadVideo", "inputs": {"file": "clip.mp4"}},
+    "22": {"class_type": "GetVideoComponents", "inputs": {"video": ["21", 0]}},
+    "25": {
+        "class_type": "VHS_VideoCombine",
+        "inputs": {"images": ["26", 0], "audio": ["22", 1], "frame_rate": 48},
+    },
+    "26": {
+        "class_type": "RIFE VFI",
+        "inputs": {"ckpt_name": "rife49.pth", "multiplier": 2, "frames": ["10", 0]},
+    },
+}
+
 
 class VramTests(unittest.TestCase):
     def test_caps_hub_8k_default_to_4k_short_side(self) -> None:
@@ -59,6 +79,27 @@ class VramTests(unittest.TestCase):
         self.assertEqual(cap_resolution(2160, 3840, {"resolution": 2160}), 2160)
         self.assertEqual(cap_resolution(2160, 3840, {}), 2160)
         self.assertEqual(cap_resolution(720, 1280, {}), 1440)
+
+    def test_fps_only_skips_seedvr2(self) -> None:
+        self.assertTrue(should_skip_upscale({"scale_changed": False, "fps_changed": True}))
+        self.assertTrue(should_skip_upscale({"skip_upscale": True}))
+        self.assertFalse(should_skip_upscale({"scale_changed": True, "fps_changed": True}))
+        self.assertFalse(should_skip_upscale({"resolution": 2160}))
+
+        patched = patch_seedvr2_prompt(
+            copy.deepcopy(INTERP_PROMPT),
+            {"scale_changed": False, "fps_changed": True, "resolution": 2160},
+        )
+        self.assertNotIn("10", patched)
+        self.assertNotIn("13", patched)
+        self.assertNotIn("14", patched)
+        self.assertEqual(patched["26"]["inputs"]["frames"], ["22", 0])
+        self.assertEqual(patched["25"]["inputs"]["images"], ["26", 0])
+
+    def test_bypass_seedvr2_keeps_rife_on_source_frames(self) -> None:
+        patched = bypass_seedvr2(copy.deepcopy(INTERP_PROMPT))
+        self.assertEqual(patched["26"]["inputs"]["frames"], ["22", 0])
+        self.assertNotIn("10", patched)
 
 
 if __name__ == "__main__":

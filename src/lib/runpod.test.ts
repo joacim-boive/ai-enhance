@@ -4,6 +4,9 @@ import {
   gpuFailureMessage,
   gpuOutputLooksLikeBytes,
   gpuShouldAlert,
+  gpuSkipUpscale,
+  gpuTaskType,
+  gpuWarmupMessage,
   isGpuConfigured,
   isGpuOom,
   parseGpuObjectOutput,
@@ -91,4 +94,19 @@ test("gpuShouldAlert stays quiet when the worker is merely cold or unset", () =>
     }),
     true,
   );
+});
+
+test("fps-only GPU jobs skip SeedVR2 and still request interpolation", () => {
+  assert.equal(gpuTaskType(false, true), "upscale_and_interpolation");
+  assert.equal(gpuSkipUpscale(false, true), true);
+  assert.equal(gpuTaskType(true, false), "upscale");
+  assert.equal(gpuSkipUpscale(true, false), false);
+  assert.equal(gpuSkipUpscale(true, true), false);
+  assert.match(gpuWarmupMessage({
+    scaleChanged: false,
+    fpsChanged: true,
+    hubCapped: true,
+    hubResolution: 2160,
+    hubDefault: 4320,
+  }), /RIFE interpolation only/);
 });
