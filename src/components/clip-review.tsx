@@ -7,6 +7,9 @@ import { engineLabel } from "@/lib/settings";
 import type { LibraryFamily, PublicClip } from "@/lib/types";
 import { ClipStats, downloadHrefFor, downloadNameFor } from "./clip-stats";
 
+const ACTION =
+  "inline-flex h-10 shrink-0 items-center justify-center rounded-full border px-4 text-xs uppercase leading-none tracking-[0.16em]";
+
 type Props = {
   family: LibraryFamily;
   selected: PublicClip;
@@ -73,17 +76,17 @@ export function ClipReview({
             ))}
           </div>
         ) : null}
-        <div className="flex flex-wrap gap-2 border-t border-[var(--line)] px-5 py-4">
+        <div className="flex flex-wrap items-center gap-2 border-t border-[var(--line)] px-5 py-4">
           <Link
             href={`/?clip=${selected.id}`}
-            className="rounded-full bg-[linear-gradient(180deg,#f3d7a8,#c48a42)] px-4 py-2 text-xs uppercase tracking-[0.16em] text-[#2a1c0a]"
+            className={`${ACTION} border-transparent bg-[linear-gradient(180deg,#f3d7a8,#c48a42)] text-[#2a1c0a]`}
           >
             Enhance this version
           </Link>
           <a
             href={downloadHrefFor(selected)}
             download={downloadNameFor(selected)}
-            className="rounded-full bg-[var(--ink)] px-4 py-2 text-xs uppercase tracking-[0.16em] text-[var(--bg)]"
+            className={`${ACTION} border-transparent bg-[var(--ink)] text-[#2a1c0a]`}
           >
             Download
           </a>
@@ -91,7 +94,7 @@ export function ClipReview({
             type="button"
             disabled={deleting}
             onClick={() => onDelete(selected)}
-            className="rounded-full border border-[var(--line)] px-4 py-2 text-xs uppercase tracking-[0.16em] text-[var(--err)] hover:border-[var(--err)] disabled:opacity-40"
+            className={`${ACTION} border-[var(--line)] text-[var(--err)] hover:border-[var(--err)] disabled:opacity-40`}
           >
             {deleting ? "Deleting…" : selected.kind === "original" ? "Delete clip" : "Delete version"}
           </button>
