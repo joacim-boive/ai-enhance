@@ -1,0 +1,9 @@
+# .graphifyignore
+node_modules/
+.next/
+out/
+build/
+coverage/
+.data/
+uploads/
+graphify-out/
