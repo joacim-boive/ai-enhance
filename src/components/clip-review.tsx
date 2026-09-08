@@ -181,7 +181,7 @@ function HistoryNode({
           </p>
           {job && ["queued", "probing", "warming", "processing", "encoding"].includes(job.status) ? (
             <div className="mt-2 h-1 overflow-hidden rounded-full bg-white/5">
-              <div className="progress-sheen h-full" style={{ width: `${Math.max(4, job.progress)}%` }} />
+              <div className="progress-sheen h-full rounded-full transition-[width] duration-300 ease-out" style={{ width: `${Math.max(4, job.progress)}%` }} />
             </div>
           ) : null}
           {job?.error ? <p className="mt-2 text-xs text-[var(--err)]">{job.error}</p> : null}

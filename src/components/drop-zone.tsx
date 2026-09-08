@@ -94,7 +94,7 @@ export function DropZone({ disabled, transfer, onFile, onSample, onDriveUrl }: P
           <p className="mt-2 max-w-sm truncate text-sm text-[var(--muted)]">{transfer.name}</p>
           <div className="mt-6 h-1.5 w-full overflow-hidden rounded-full bg-white/5">
             <div
-              className={`h-full rounded-full ${percent === null ? "progress-sheen w-1/3" : "bg-[var(--gold)]"}`}
+              className={`progress-sheen h-full rounded-full transition-[width] duration-300 ease-out ${percent === null ? "w-1/3" : ""}`}
               style={percent === null ? undefined : { width: `${Math.max(4, percent)}%` }}
             />
           </div>
