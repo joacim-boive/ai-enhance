@@ -272,9 +272,7 @@ export async function pollGpuJob(
             workers,
           })
         ) {
-          throw new Error(
-            "GPU worker stayed queued while pulling the image. Falling back to CPU.",
-          );
+          throw new Error(GPU_QUEUE_STUCK_MESSAGE);
         }
       }
     }
@@ -445,3 +443,5 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
 }
 
 export const GPU_QUEUE_TIMEOUT_MS = 6 * 60 * 1000;
+export const GPU_QUEUE_STUCK_MESSAGE =
+  "GPU worker stayed queued while pulling the image. Retry the job — it stays on the RTX 4090 (CPU fallback is off).";

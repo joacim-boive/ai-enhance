@@ -36,4 +36,4 @@ docker build -t YOUR_REGISTRY/lumen-enhance-worker:r2 \
   -f runpod-worker/Dockerfile runpod-worker
 ```
 
-Until the wrap is live, GPU jobs either OOM on 4K (stock Hub) or fail closed on missing object keys. The app falls back to CPU.
+Until the wrap is live, GPU jobs either OOM on 4K (stock Hub) or fail closed on missing object keys. The app does not fall back to CPU.
