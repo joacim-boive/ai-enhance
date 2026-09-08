@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   GPU_QUEUE_STUCK_MESSAGE,
   gpuFailureMessage,
+  gpuJobFollowKind,
   gpuOutputLooksLikeBytes,
   gpuShouldAlert,
   gpuSkipUpscale,
@@ -60,6 +61,7 @@ test("gpuFailureMessage rewrites SeedVR2 device allocation OOMs", () => {
     /VRAM/,
   );
   assert.equal(gpuFailureMessage("", "FAILED"), "GPU job failed");
+  assert.match(gpuFailureMessage("", "TIMED_OUT"), /time limit/i);
 });
 
 test("queue timeout message does not mention CPU fallback", () => {
@@ -127,4 +129,12 @@ test("fps-only GPU jobs skip SeedVR2 and still request interpolation", () => {
     hubResolution: 2160,
     hubDefault: 4320,
   }), /RIFE interpolation only/);
+});
+
+test("GPU follow completes finished jobs and fails timed-out ones", () => {
+  assert.equal(gpuJobFollowKind("COMPLETED"), "complete");
+  assert.equal(gpuJobFollowKind("IN_PROGRESS"), "wait");
+  assert.equal(gpuJobFollowKind("IN_QUEUE"), "wait");
+  assert.equal(gpuJobFollowKind("TIMED_OUT"), "fail");
+  assert.equal(gpuJobFollowKind("FAILED"), "fail");
 });
