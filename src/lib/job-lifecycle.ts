@@ -36,6 +36,7 @@ export function shouldExtendGpuQueueWait(input: {
     running: number;
     initializing: number;
     throttled: number;
+    unhealthy?: number;
   } | null;
 }): boolean {
   if (input.elapsedMs < input.timeoutMs) {
@@ -49,5 +50,10 @@ export function shouldExtendGpuQueueWait(input: {
   if (!workers) {
     return false;
   }
-  return workers.initializing > 0 || workers.throttled > 0 || workers.running > 0;
+  return (
+    workers.initializing > 0 ||
+    workers.throttled > 0 ||
+    workers.running > 0 ||
+    (workers.unhealthy ?? 0) > 0
+  );
 }

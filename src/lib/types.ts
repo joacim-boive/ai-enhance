@@ -143,6 +143,17 @@ export type LibraryFamily = {
 
 export type HostEnvironment = "production" | "preview" | "development" | "local";
 
+export type GpuHealthKind =
+  | "unset"
+  | "missing_r2"
+  | "unreachable"
+  | "on_demand"
+  | "warming"
+  | "idle"
+  | "running"
+  | "throttled"
+  | "unhealthy";
+
 export type HealthStatus = {
   ffmpeg: { ok: boolean; version: string | null };
   blob: { configured: boolean };
@@ -155,11 +166,13 @@ export type HealthStatus = {
     endpointId: string | null;
     ready: boolean;
     alert: boolean;
+    kind: GpuHealthKind;
     workers: {
       idle: number;
       running: number;
       initializing: number;
       throttled: number;
+      unhealthy: number;
     } | null;
     message: string;
   };

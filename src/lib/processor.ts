@@ -407,7 +407,16 @@ async function runGpu(
       void cancelGpuJob(runpodJobId);
     };
     signal.addEventListener("abort", onAbort, { once: true });
-    const output = await pollGpuJob(runpodJobId, signal);
+    const output = await pollGpuJob(runpodJobId, signal, {
+      onWait: async (update) => {
+        await appendEvent(job.id, {
+          stage: update.stage,
+          message: update.message,
+          progress: ticks,
+          level: update.level,
+        });
+      },
+    });
     signal.removeEventListener("abort", onAbort);
     await persistGpuObject(job, output);
     return "gpu";

@@ -1,6 +1,24 @@
 import { missingGpuKeyMessage, r2Enabled, runtimeEnv } from "./env";
+import {
+  gpuHealthKind,
+  gpuIssueFromLogLines,
+  gpuMissingR2Message,
+  gpuOnDemandMessage,
+  gpuQueueWaitUpdate,
+  gpuShouldAlert,
+  gpuUnreachableMessage,
+  gpuWorkerReadyCount,
+  gpuWorkerStatusMessage,
+  parseGpuWorkersResponse,
+  type GpuQueueWaitUpdate,
+  type GpuWorkerPlacement,
+  type GpuWorkerSnapshot,
+} from "./gpu-health";
 import { GPU_QUEUE_HARD_TIMEOUT_MS, shouldExtendGpuQueueWait } from "./job-lifecycle";
 import type { HealthStatus } from "./types";
+
+export { gpuShouldAlert };
+export type { GpuQueueWaitUpdate };
 
 const DEFAULT_ENDPOINT = "tbsk82cmm6azwh";
 const STUCK_IMAGE_PULL_ENDPOINT = "npjpz24ig6c47j";
@@ -35,23 +53,6 @@ type RunpodStatusResponse = {
   error?: string;
 };
 
-export function gpuShouldAlert(input: {
-  configured: boolean;
-  r2Ready: boolean;
-  reachable: boolean;
-  httpOk: boolean;
-  ready: boolean;
-  throttled: number;
-}): boolean {
-  if (!input.configured) {
-    return false;
-  }
-  if (!input.r2Ready || !input.reachable || !input.httpOk) {
-    return true;
-  }
-  return input.throttled > 0 && !input.ready;
-}
-
 export async function gpuHealth(): Promise<HealthStatus["gpu"]> {
   const { apiKey, endpointId } = runpodConfig();
   if (!apiKey) {
@@ -60,63 +61,245 @@ export async function gpuHealth(): Promise<HealthStatus["gpu"]> {
       endpointId: null,
       ready: false,
       alert: false,
+      kind: "unset",
       workers: null,
       message: missingGpuKeyMessage(),
     };
   }
   const r2Ready = r2Enabled();
-  // Do not GET Runpod /health from the studio poll. That ping can reset
-  // idle timeout and leave a 4090 billed after a job (or a config change).
+  if (!r2Ready) {
+    return {
+      configured: true,
+      endpointId,
+      ready: false,
+      alert: true,
+      kind: "missing_r2",
+      workers: null,
+      message: gpuMissingR2Message(),
+    };
+  }
+  // List workers via REST. Do not GET api.runpod.ai /health — that ping can
+  // reset idle timeout and leave a 4090 billed after a job.
+  const fetched = await fetchGpuWorkerSnapshot();
+  const workers = fetched.snapshot
+    ? {
+        idle: fetched.snapshot.idle,
+        running: fetched.snapshot.running,
+        initializing: fetched.snapshot.initializing,
+        throttled: fetched.snapshot.throttled,
+        unhealthy: fetched.snapshot.unhealthy,
+      }
+    : null;
+  const ready = gpuWorkerReadyCount(workers) > 0;
+  const kind = gpuHealthKind({
+    configured: true,
+    r2Ready: true,
+    reachable: fetched.reachable,
+    httpOk: fetched.httpOk,
+    workers,
+  });
+  const alert = gpuShouldAlert({
+    configured: true,
+    r2Ready: true,
+    reachable: fetched.reachable,
+    httpOk: fetched.httpOk,
+    ready,
+    throttled: workers?.throttled ?? 0,
+    unhealthy: workers?.unhealthy ?? 0,
+  });
+  let message = gpuOnDemandMessage();
+  if (!fetched.reachable || !fetched.httpOk) {
+    message = gpuUnreachableMessage();
+  } else if (fetched.snapshot) {
+    message = gpuWorkerStatusMessage(fetched.snapshot);
+  }
   return {
     configured: true,
     endpointId,
-    ready: false,
-    alert: !r2Ready,
-    workers: null,
-    message: r2Ready
-      ? "GPU is on demand. The first enhance job warms an RTX 4090."
-      : "GPU is configured, but Cloudflare R2 is missing. The worker cannot land a private master without a presigned upload.",
+    ready,
+    alert,
+    kind,
+    workers,
+    message,
   };
 }
 
-type RunpodHealth = {
-  workers?: {
-    idle?: number;
-    running?: number;
-    initializing?: number;
-    throttled?: number;
-    ready?: number;
-  };
+type GpuWorkerFetchResult = {
+  reachable: boolean;
+  httpOk: boolean;
+  snapshot: GpuWorkerSnapshot | null;
 };
 
-async function fetchGpuWorkers(): Promise<{
-  idle: number;
-  running: number;
-  initializing: number;
-  throttled: number;
-} | null> {
+const workerLogIssueCache = new Map<string, { at: number; issue: string | null }>();
+const WORKER_LOG_CACHE_MS = 45_000;
+const WORKER_POLL_MS = 15_000;
+
+async function fetchGpuWorkerSnapshot(): Promise<GpuWorkerFetchResult> {
   const { apiKey, endpointId } = runpodConfig();
   if (!apiKey) {
-    return null;
+    return { reachable: false, httpOk: false, snapshot: null };
   }
   try {
-    const response = await fetch(`https://api.runpod.ai/v2/${endpointId}/health`, {
-      headers: { Authorization: `Bearer ${apiKey}` },
-      cache: "no-store",
-    });
+    const response = await fetch(
+      `https://api.runpod.io/v2/serverless/${endpointId}/workers?limit=100`,
+      {
+        headers: { Authorization: `Bearer ${apiKey}` },
+        cache: "no-store",
+      },
+    );
     if (!response.ok) {
-      return null;
+      return { reachable: true, httpOk: false, snapshot: null };
     }
-    const data = (await response.json()) as RunpodHealth;
+    const data: unknown = await response.json();
     return {
-      idle: data.workers?.idle ?? 0,
-      running: data.workers?.running ?? 0,
-      initializing: data.workers?.initializing ?? 0,
-      throttled: data.workers?.throttled ?? 0,
+      reachable: true,
+      httpOk: true,
+      snapshot: parseGpuWorkersResponse(data),
     };
   } catch {
-    return null;
+    return { reachable: false, httpOk: false, snapshot: null };
   }
+}
+
+async function diagnoseGpuWorkers(snapshot: GpuWorkerSnapshot): Promise<GpuWorkerSnapshot> {
+  const { apiKey, endpointId } = runpodConfig();
+  if (!apiKey) {
+    return snapshot;
+  }
+  const suspects = snapshot.workers.filter(
+    (worker) => worker.status === "THROTTLED" || worker.status === "UNHEALTHY",
+  );
+  const diagnosed = await Promise.all(
+    suspects.slice(0, 2).map(async (worker) => {
+      const issue = await peekGpuWorkerIssue(apiKey, endpointId, worker);
+      return { id: worker.id, issue };
+    }),
+  );
+  const issues = new Map(diagnosed.map((item) => [item.id, item.issue]));
+  return {
+    ...snapshot,
+    workers: snapshot.workers.map((worker) => ({
+      ...worker,
+      issue: issues.get(worker.id) ?? worker.issue,
+    })),
+  };
+}
+
+async function peekGpuWorkerIssue(
+  apiKey: string,
+  endpointId: string,
+  worker: GpuWorkerPlacement,
+): Promise<string | null> {
+  const cached = workerLogIssueCache.get(worker.id);
+  const now = Date.now();
+  if (cached && now - cached.at < WORKER_LOG_CACHE_MS) {
+    return cached.issue;
+  }
+  const lines = await peekWorkerSystemLogs(apiKey, endpointId, worker.id);
+  const issue = gpuIssueFromLogLines(lines);
+  workerLogIssueCache.set(worker.id, { at: now, issue });
+  return issue;
+}
+
+async function peekWorkerSystemLogs(
+  apiKey: string,
+  endpointId: string,
+  workerId: string,
+  timeoutMs = 1800,
+): Promise<string[]> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(
+      `https://api.runpod.io/v2/serverless/${endpointId}/workers/${encodeURIComponent(workerId)}/logs?source=system&tail=40`,
+      {
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          Accept: "text/event-stream",
+        },
+        cache: "no-store",
+        signal: controller.signal,
+      },
+    );
+    if (!response.ok || !response.body) {
+      return [];
+    }
+    const contentType = response.headers.get("content-type") ?? "";
+    if (contentType.includes("application/json")) {
+      const data: unknown = await response.json();
+      return jsonLogLines(data);
+    }
+    return await readSseLogLines(response.body, controller.signal);
+  } catch {
+    return [];
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function jsonLogLines(data: unknown): string[] {
+  if (!data || typeof data !== "object") {
+    return [];
+  }
+  const record = data as Record<string, unknown>;
+  const items = Array.isArray(record.items)
+    ? record.items
+    : Array.isArray(record.logs)
+      ? record.logs
+      : [];
+  const lines: string[] = [];
+  for (const item of items) {
+    if (!item || typeof item !== "object") {
+      continue;
+    }
+    const line = (item as Record<string, unknown>).line;
+    if (typeof line === "string" && line.length > 0) {
+      lines.push(line);
+    }
+  }
+  return lines;
+}
+
+async function readSseLogLines(
+  body: ReadableStream<Uint8Array>,
+  signal: AbortSignal,
+): Promise<string[]> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  const lines: string[] = [];
+  try {
+    while (lines.length < 40 && !signal.aborted) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+      buffer += decoder.decode(value, { stream: true });
+      const chunks = buffer.split("\n");
+      buffer = chunks.pop() ?? "";
+      for (const chunk of chunks) {
+        const trimmed = chunk.trim();
+        if (!trimmed.startsWith("data:")) {
+          continue;
+        }
+        const payload = trimmed.slice(5).trim();
+        if (!payload) {
+          continue;
+        }
+        try {
+          const parsed = JSON.parse(payload) as { line?: unknown };
+          if (typeof parsed.line === "string" && parsed.line.length > 0) {
+            lines.push(parsed.line);
+          }
+        } catch {
+          lines.push(payload);
+        }
+      }
+    }
+  } finally {
+    await reader.cancel().catch(() => undefined);
+  }
+  return lines;
 }
 
 export function gpuTaskType(
@@ -241,11 +424,14 @@ export async function getGpuJobStatus(runpodJobId: string): Promise<RunpodStatus
 export async function pollGpuJob(
   jobId: string,
   signal: AbortSignal,
+  options?: { onWait?: (update: GpuQueueWaitUpdate) => Promise<void> },
 ): Promise<unknown> {
   if (!runpodConfig().apiKey) {
     throw new Error("GPU is not configured");
   }
   const started = Date.now();
+  let lastWorkerCheck = 0;
+  let lastWaitMessage = "";
   while (!signal.aborted) {
     const data = await getGpuJobStatus(jobId);
     if (data.status === "COMPLETED") {
@@ -264,17 +450,42 @@ export async function pollGpuJob(
     }
     if (data.status === "IN_QUEUE" || !data.status) {
       const elapsedMs = Date.now() - started;
+      const now = Date.now();
+      let snapshot: GpuWorkerSnapshot | null = null;
+      if (now - lastWorkerCheck >= WORKER_POLL_MS) {
+        lastWorkerCheck = now;
+        const fetched = await fetchGpuWorkerSnapshot();
+        snapshot = fetched.snapshot
+          ? await diagnoseGpuWorkers(fetched.snapshot)
+          : null;
+        const update = gpuQueueWaitUpdate(snapshot, data.status);
+        const notable =
+          update.level === "warn" ||
+          Boolean(snapshot && snapshot.workers.length > 0);
+        if (options?.onWait && notable && update.message !== lastWaitMessage) {
+          lastWaitMessage = update.message;
+          await options.onWait(update);
+        }
+      }
       if (elapsedMs > GPU_QUEUE_TIMEOUT_MS) {
-        const workers = await fetchGpuWorkers();
+        if (!snapshot) {
+          const fetched = await fetchGpuWorkerSnapshot();
+          snapshot = fetched.snapshot;
+        }
         if (
           !shouldExtendGpuQueueWait({
             elapsedMs,
             timeoutMs: GPU_QUEUE_TIMEOUT_MS,
             hardTimeoutMs: GPU_QUEUE_HARD_TIMEOUT_MS,
-            workers,
+            workers: snapshot,
           })
         ) {
-          throw new Error(GPU_QUEUE_STUCK_MESSAGE);
+          const diagnosed = snapshot ? gpuWorkerStatusMessage(snapshot) : null;
+          throw new Error(
+            diagnosed && diagnosed !== gpuOnDemandMessage()
+              ? diagnosed
+              : GPU_QUEUE_STUCK_MESSAGE,
+          );
         }
       }
     }

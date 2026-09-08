@@ -113,4 +113,12 @@ test("queue wait extends while a worker is initializing", () => {
     }),
     false,
   );
+  assert.equal(
+    shouldExtendGpuQueueWait({
+      elapsedMs: 7 * 60 * 1000,
+      timeoutMs: 6 * 60 * 1000,
+      workers: { idle: 0, running: 0, initializing: 0, throttled: 0, unhealthy: 1 },
+    }),
+    true,
+  );
 });

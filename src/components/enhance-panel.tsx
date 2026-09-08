@@ -12,6 +12,7 @@ import {
   settingsFromPreset,
   withCustomOverride,
 } from "@/lib/settings";
+import { gpuShowsFleetBanner } from "@/lib/gpu-health";
 import type { EnginePreference, HealthStatus, JobSettings, VideoMeta } from "@/lib/types";
 
 type Props = {
@@ -146,7 +147,7 @@ export function EnhancePanel({
           <p className="mt-3 text-[11px] leading-5 text-[var(--gold)]">
             GPU needs private R2 so the worker can upload the master without sending bytes through Vercel.
           </p>
-        ) : health?.gpu.alert ? (
+        ) : health?.gpu && gpuShowsFleetBanner(health.gpu) ? (
           <p className="mt-3 text-[11px] leading-5 text-[var(--gold)]">{health.gpu.message}</p>
         ) : null}
       </div>
