@@ -173,17 +173,8 @@ export function StudioApp() {
       }
     };
     void init();
-    const timer = setInterval(() => {
-      void (async () => {
-        const h = await fetchHealth();
-        if (!unmounted) {
-          setHealth(h);
-        }
-      })();
-    }, 20000);
     return () => {
       unmounted = true;
-      clearInterval(timer);
     };
   }, [loadClipOntoBench, loadJobs]);
 
@@ -240,6 +231,22 @@ export function StudioApp() {
     }, 2500);
     return () => window.clearInterval(timer);
   }, [hasActiveJobs, loadJobs]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const timer = window.setInterval(() => {
+      void (async () => {
+        const latest = await fetchHealth();
+        if (!cancelled && latest) {
+          setHealth(latest);
+        }
+      })();
+    }, hasActiveJobs ? 8000 : 20000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [hasActiveJobs]);
 
   async function uploadFile(input: File) {
     setUploading(true);
@@ -616,6 +623,7 @@ export function StudioApp() {
       {selectedJob && !reviewJob ? (
         <JobRail
           job={selectedJob}
+          gpu={health?.gpu ?? null}
           onCancel={() => void cancel(selectedJob.id)}
           onRetry={() => void retry(selectedJob.id)}
         />

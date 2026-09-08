@@ -374,11 +374,16 @@ async function dispatchGpu(job: Job, target: OutputTarget): Promise<string> {
     resolution: hub.resolution,
     rotation: meta.rotation,
   });
-  await patchJob(job.id, { runpodJobId, status: "processing", stage: "Enhancing on GPU" });
+  await patchJob(job.id, {
+    runpodJobId,
+    status: "warming",
+    stage: "Queued on GPU",
+    progress: 12,
+  });
   await appendEvent(job.id, {
-    stage: "Enhancing on GPU",
-    message: "Queued on Runpod. The worker streams the master to private R2.",
-    progress: 18,
+    stage: "Queued on GPU",
+    message: "Submitted to Runpod. Waiting for a worker — the GPU has not started this job yet.",
+    progress: 12,
     level: "info",
   });
   return runpodJobId;
@@ -396,18 +401,32 @@ async function runGpu(
   const current = (await loadJob(job.id)) ?? job;
   const runpodJobId = current.runpodJobId ?? (await dispatchGpu(current, target));
 
-  let ticks = 18;
-  const pulse = setInterval(() => {
-    ticks = Math.min(88, ticks + 2);
-    void patchJob(job.id, { progress: ticks, status: "processing", stage: "Enhancing on GPU" });
-  }, 4000);
-
+  let lastEventKey = "";
   try {
     const onAbort = () => {
       void cancelGpuJob(runpodJobId);
     };
     signal.addEventListener("abort", onAbort, { once: true });
-    const output = await pollGpuJob(runpodJobId, signal);
+    const output = await pollGpuJob(runpodJobId, signal, {
+      onWait: async (update) => {
+        await patchJob(job.id, {
+          status: update.runpodStatus === "IN_PROGRESS" ? "processing" : "warming",
+          stage: update.stage,
+          progress: update.progress,
+        });
+        const eventKey = `${update.stage}|${update.level}|${update.message}|${Math.floor(update.progress / 5)}`;
+        if (eventKey === lastEventKey) {
+          return;
+        }
+        lastEventKey = eventKey;
+        await appendEvent(job.id, {
+          stage: update.stage,
+          message: update.message,
+          progress: update.progress,
+          level: update.level,
+        });
+      },
+    });
     signal.removeEventListener("abort", onAbort);
     await persistGpuObject(job, output);
     return "gpu";
@@ -416,8 +435,6 @@ async function runGpu(
       void cancelGpuJob(runpodJobId);
     }
     throw error;
-  } finally {
-    clearInterval(pulse);
   }
 }
 

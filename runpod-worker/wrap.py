@@ -22,6 +22,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)) or "/")
 
 import runpod.serverless as serverless
 
+from progress import comfy_progress_percent
 from r2_put import upload_master
 from vram import (
     apply_cuda_alloc,
@@ -36,11 +37,40 @@ apply_cuda_alloc()
 _real_start = serverless.start
 HUB_HANDLER = os.environ.get("LUMEN_HUB_HANDLER", "/hub_handler.py")
 _job_input: ContextVar[dict[str, Any]] = ContextVar("lumen_job_input", default={})
+_current_job: ContextVar[Any] = ContextVar("lumen_job", default=None)
 
 
 def _current_input() -> dict[str, Any]:
     value = _job_input.get()
     return value if isinstance(value, dict) else {}
+
+
+def _progress(percent: int, stage: str, detail: str = "") -> None:
+    job = _current_job.get()
+    if not job:
+        return
+    payload = {
+        "percent": max(0, min(99, int(percent))),
+        "stage": stage,
+        "detail": detail,
+    }
+    try:
+        serverless.progress_update(job, json.dumps(payload))
+    except Exception as exc:
+        print(f"Lumen wrap: progress_update failed: {exc}", flush=True)
+
+
+def _progress_from_comfy_message(message: dict[str, Any]) -> None:
+    kind = message.get("type")
+    data = message.get("data") if isinstance(message.get("data"), dict) else {}
+    if kind == "progress":
+        value = data.get("value")
+        maximum = data.get("max") or data.get("maximum") or 0
+        try:
+            percent = comfy_progress_percent(float(value), float(maximum))
+        except (TypeError, ValueError):
+            return
+        _progress(percent, "Enhancing on GPU", f"{int(float(value))}/{int(float(maximum))} samples")
 
 
 def _wrap_queue_prompt(original):
@@ -96,6 +126,7 @@ def _wrap_get_video_path(original):
         prompt_id = queued["prompt_id"]
         deadline = time.time() + 3600
         socket = ws
+        _progress(28, "Enhancing on GPU", "ComfyUI graph is running")
         while time.time() < deadline:
             if socket is not None:
                 try:
@@ -108,6 +139,7 @@ def _wrap_get_video_path(original):
                             raise RuntimeError(
                                 str(data.get("exception_message") or data.get("exception_type") or "ComfyUI execution error"),
                             )
+                        _progress_from_comfy_message(message)
                         if message.get("type") == "executing":
                             data = message.get("data") if isinstance(message.get("data"), dict) else {}
                             if data.get("node") is None and data.get("prompt_id") == prompt_id:
@@ -166,14 +198,20 @@ def _patched_start(config):
 
     def handler(job):
         payload = job.get("input") if isinstance(job, dict) else {}
-        token = _job_input.set(payload if isinstance(payload, dict) else {})
+        input_token = _job_input.set(payload if isinstance(payload, dict) else {})
+        job_token = _current_job.set(job)
         try:
+            _progress(22, "Starting on GPU", "Worker picked up the job")
             output = inner(job)
+            if isinstance(output, dict) and output.get("error"):
+                return output
+            _progress(88, "Uploading master", "Streaming the mp4 to private R2")
+            uploaded = upload_master(payload if isinstance(payload, dict) else {}, output)
+            _progress(96, "Uploading master", "Master landed in R2")
+            return uploaded
         finally:
-            _job_input.reset(token)
-        if isinstance(output, dict) and output.get("error"):
-            return output
-        return upload_master(payload if isinstance(payload, dict) else {}, output)
+            _current_job.reset(job_token)
+            _job_input.reset(input_token)
 
     _real_start({**config, "handler": handler})
 

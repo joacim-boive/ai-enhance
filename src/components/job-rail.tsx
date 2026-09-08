@@ -1,11 +1,13 @@
 "use client";
 
 import { formatEta } from "@/lib/format";
+import { gpuShowsFleetBanner } from "@/lib/gpu-health";
 import { engineLabel } from "@/lib/settings";
-import type { PublicJob } from "@/lib/types";
+import type { HealthStatus, PublicJob } from "@/lib/types";
 
 type Props = {
   job: PublicJob;
+  gpu?: HealthStatus["gpu"] | null;
   onCancel: () => void;
   onRetry: () => void;
 };
@@ -20,10 +22,11 @@ const STAGES = [
   "Ready",
 ];
 
-export function JobRail({ job, onCancel, onRetry }: Props) {
+export function JobRail({ job, gpu = null, onCancel, onRetry }: Props) {
   const active = ["queued", "probing", "warming", "processing", "encoding"].includes(
     job.status,
   );
+  const showGpuFleet = Boolean(active && job.engine === "gpu" && gpu && gpuShowsFleetBanner(gpu));
   return (
     <section className="panel mt-6 rounded-[28px] p-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -32,9 +35,10 @@ export function JobRail({ job, onCancel, onRetry }: Props) {
             Live processing
           </p>
           <h3 className="mt-1 font-serif text-2xl tracking-tight">{job.stage}</h3>
-          <p className="mt-1 font-mono text-[11px] uppercase tracking-[0.16em] text-[var(--muted)]">
-            {engineLabel(job.engine, job.settings)} · {job.progress}% · ETA {formatEta(job.etaSec)}
-          </p>
+      <p className="mt-1 font-mono text-[11px] uppercase tracking-[0.16em] text-[var(--muted)]">
+        {engineLabel(job.engine, job.settings)} · {job.progress}%
+        {job.etaSec != null ? ` · ETA ${formatEta(job.etaSec)}` : null}
+      </p>
         </div>
         <div className="flex gap-2">
           {active ? (
@@ -65,6 +69,14 @@ export function JobRail({ job, onCancel, onRetry }: Props) {
         />
       </div>
 
+      {showGpuFleet && gpu ? (
+        <p
+          role="status"
+          className="mt-4 rounded-2xl border border-[rgba(232,195,106,0.3)] bg-[rgba(232,195,106,0.08)] px-4 py-3 text-sm text-[var(--warn)]"
+        >
+          {gpu.message}
+        </p>
+      ) : null}
       {job.fallbackReason && active ? (
         <p className="mt-4 rounded-2xl border border-[rgba(232,195,106,0.3)] bg-[rgba(232,195,106,0.08)] px-4 py-3 text-sm text-[var(--warn)]">
           Fell back after {job.fallbackReason}
@@ -80,7 +92,13 @@ export function JobRail({ job, onCancel, onRetry }: Props) {
         {job.events.slice(-8).reverse().map((event) => (
           <li
             key={event.id}
-            className="rounded-2xl border border-[var(--line)] bg-black/20 px-4 py-3"
+            className={`rounded-2xl border px-4 py-3 ${
+              event.level === "error"
+                ? "border-[rgba(224,122,106,0.35)] bg-[rgba(224,122,106,0.08)]"
+                : event.level === "warn"
+                  ? "border-[rgba(232,195,106,0.3)] bg-[rgba(232,195,106,0.08)]"
+                  : "border-[var(--line)] bg-black/20"
+            }`}
           >
             <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-[var(--muted)]">
               {event.stage} · {event.level}
