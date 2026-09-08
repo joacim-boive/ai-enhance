@@ -374,11 +374,16 @@ async function dispatchGpu(job: Job, target: OutputTarget): Promise<string> {
     resolution: hub.resolution,
     rotation: meta.rotation,
   });
-  await patchJob(job.id, { runpodJobId, status: "processing", stage: "Enhancing on GPU" });
+  await patchJob(job.id, {
+    runpodJobId,
+    status: "warming",
+    stage: "Queued on GPU",
+    progress: 12,
+  });
   await appendEvent(job.id, {
-    stage: "Enhancing on GPU",
-    message: "Queued on Runpod. The worker streams the master to private R2.",
-    progress: 18,
+    stage: "Queued on GPU",
+    message: "Submitted to Runpod. Waiting for a worker — the GPU has not started this job yet.",
+    progress: 12,
     level: "info",
   });
   return runpodJobId;
