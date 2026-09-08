@@ -60,7 +60,7 @@ export function JobRail({ job, onCancel, onRetry }: Props) {
 
       <div className="mt-5 h-1.5 overflow-hidden rounded-full bg-white/5">
         <div
-          className={`h-full rounded-full ${job.status === "failed" ? "bg-[var(--err)]" : "progress-sheen"}`}
+          className={`h-full rounded-full transition-[width] duration-300 ease-out ${job.status === "failed" ? "bg-[var(--err)]" : "progress-sheen"}`}
           style={{ width: `${Math.max(2, job.progress)}%` }}
         />
       </div>
