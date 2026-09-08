@@ -47,9 +47,6 @@ const HUB_AUTH_MESSAGE =
 const HUB_PULL_MESSAGE =
   "Hub image pull is stuck pending in this region. A worker in another data center, often Europe, usually comes up first.";
 
-const HUB_REGION_HINT =
-  "Hub image pull or registry auth can stall in some data centers; a Europe worker often comes up first.";
-
 export function emptyGpuWorkerCounts(): GpuWorkerCounts {
   return { idle: 0, running: 0, initializing: 0, throttled: 0, unhealthy: 0 };
 }
@@ -144,6 +141,9 @@ export function gpuShowsFleetBanner(gpu: HealthStatus["gpu"]): boolean {
   if (!gpu.configured || gpu.kind === "unset" || gpu.kind === "missing_r2") {
     return false;
   }
+  if (gpu.kind === "idle" || gpu.kind === "running" || gpu.kind === "on_demand") {
+    return false;
+  }
   if (
     gpu.alert ||
     gpu.kind === "warming" ||
@@ -156,6 +156,7 @@ export function gpuShowsFleetBanner(gpu: HealthStatus["gpu"]): boolean {
   const workers = gpu.workers;
   return Boolean(
     workers &&
+      gpuWorkerReadyCount(workers) === 0 &&
       (workers.throttled > 0 || workers.unhealthy > 0 || workers.initializing > 0),
   );
 }
@@ -164,7 +165,7 @@ export function formatDataCenter(id: string | null): string {
   if (!id) {
     return "an unknown region";
   }
-  if (id.startsWith("EUR")) {
+  if (id.startsWith("EUR") || id.startsWith("EU-")) {
     return `${id} (Europe)`;
   }
   if (id.startsWith("US")) {
@@ -177,10 +178,6 @@ export function formatDataCenter(id: string | null): string {
     return `${id} (Asia)`;
   }
   return id;
-}
-
-export function isHubRegistryImage(image: string | null): boolean {
-  return Boolean(image && image.includes("registry.runpod.net"));
 }
 
 export function gpuIssueFromLogLine(line: string): string | null {
@@ -263,16 +260,12 @@ export function gpuWorkerStatusMessage(snapshot: GpuWorkerSnapshot | null): stri
       parts.push(
         `${throttled.length} other worker${throttled.length === 1 ? "" : "s"} throttled in ${joinRegions(throttled)}.`,
       );
-    } else if (diagnosed.length === 1) {
+    } else     if (diagnosed.length === 1) {
       parts.push(`Throttled in ${joinRegions(throttled)}. ${diagnosed[0]}`);
     } else {
       parts.push(
         `GPU workers are throttled in ${joinRegions(throttled)}. Jobs stay queued until a worker becomes ready.`,
       );
-    }
-    const hint = hubHint(snapshot.workers);
-    if (hint && !parts.join(" ").includes("Hub")) {
-      parts.push(hint);
     }
   }
 
@@ -542,19 +535,6 @@ function joinRegions(workers: GpuWorkerPlacement[]): string {
 
 function uniqueIssues(workers: GpuWorkerPlacement[]): string[] {
   return [...new Set(workers.map((worker) => worker.issue).filter((issue): issue is string => Boolean(issue)))];
-}
-
-function hubHint(workers: GpuWorkerPlacement[]): string | null {
-  if (workers.some((worker) => worker.issue && /hub/i.test(worker.issue))) {
-    return null;
-  }
-  const blocked = workers.filter(
-    (worker) => worker.status === "THROTTLED" || worker.status === "INITIALIZING" || worker.status === "UNHEALTHY",
-  );
-  if (blocked.some((worker) => isHubRegistryImage(worker.image))) {
-    return HUB_REGION_HINT;
-  }
-  return null;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
