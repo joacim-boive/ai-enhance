@@ -500,7 +500,7 @@ export function StudioApp() {
   const workingLabel = uploading ? "Uploading…" : starting ? "Queuing…" : "Working…";
 
   return (
-    <div className="relative mx-auto min-h-screen w-full max-w-[1440px] px-5 pb-20 pt-6 md:px-8">
+    <div className="relative mx-auto min-h-screen w-full max-w-[1440px] overflow-x-hidden px-5 pb-20 pt-6 md:px-8">
       <AppHeader
         health={health}
         activeJobCount={metrics.active}

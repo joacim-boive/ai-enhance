@@ -3,7 +3,6 @@
 import { useState, type FormEvent } from "react";
 import { isGoogleDriveUrl } from "@/lib/drive";
 import { formatBytes } from "@/lib/format";
-import { ACCEPTED_EXTENSIONS, ACCEPTED_VIDEO_TYPES } from "@/lib/settings";
 import type { SourceTransfer } from "@/lib/types";
 
 type Props = {
@@ -112,12 +111,12 @@ export function DropZone({ disabled, transfer, onFile, onSample, onDriveUrl }: P
             straight to private storage; this app never holds the file.
           </p>
           <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
-            <label className="cursor-pointer rounded-full bg-[var(--ink)] px-5 py-3 text-xs uppercase tracking-[0.2em] text-[var(--bg)]">
+            <label className="relative z-10 cursor-pointer rounded-full bg-[var(--ink)] px-5 py-3 text-xs uppercase tracking-[0.2em] text-[var(--bg)]">
               Choose file
               <input
                 type="file"
-                accept={[...ACCEPTED_VIDEO_TYPES, ...ACCEPTED_EXTENSIONS].join(",")}
-                className="hidden"
+                accept="video/*"
+                className="absolute inset-0 cursor-pointer opacity-0"
                 disabled={disabled}
                 onChange={(event) => {
                   accept(event.target.files?.[0]);
