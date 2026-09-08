@@ -146,3 +146,41 @@ export function latestVersion(family: LibraryFamily): PublicClip {
   }
   return versions.reduce((latest, clip) => (clip.createdAt > latest.createdAt ? clip : latest));
 }
+
+export function removeClipFromFamilies(
+  families: LibraryFamily[],
+  clip: PublicClip,
+): LibraryFamily[] {
+  if (clip.kind === "original") {
+    return families.filter((family) => family.root.id !== clip.id);
+  }
+
+  const doomedIds = new Set(
+    collectDescendantIds(
+      clip.id,
+      families.flatMap((family) => family.clips),
+    ),
+  );
+
+  return families
+    .map((family) => {
+      if (!family.clips.some((c) => doomedIds.has(c.id))) {
+        return family;
+      }
+      const remainingClips = family.clips.filter((c) => !doomedIds.has(c.id));
+      if (remainingClips.length === 0) {
+        return null;
+      }
+      const remainingJobs = family.jobs.filter(
+        (job) =>
+          (!job.sourceClipId || !doomedIds.has(job.sourceClipId)) &&
+          (!job.outputClipId || !doomedIds.has(job.outputClipId)),
+      );
+      return {
+        ...family,
+        clips: remainingClips,
+        jobs: remainingJobs,
+      };
+    })
+    .filter((family): family is LibraryFamily => family !== null);
+}

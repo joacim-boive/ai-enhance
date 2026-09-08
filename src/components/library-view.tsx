@@ -9,9 +9,15 @@ import {
   formatFps,
   formatResolution,
 } from "@/lib/format";
-import { historyEntries, latestVersion, versionCount } from "@/lib/library-tree";
-import type { LibraryFamily, PublicClip } from "@/lib/types";
+import {
+  historyEntries,
+  latestVersion,
+  removeClipFromFamilies,
+  versionCount,
+} from "@/lib/library-tree";
+import type { LibraryFamily, PublicClip, Toast } from "@/lib/types";
 import { ClipReview } from "./clip-review";
+import { ToastViewport } from "./toast-viewport";
 
 export function LibraryView() {
   const [families, setFamilies] = useState<LibraryFamily[]>([]);
@@ -21,6 +27,19 @@ export function LibraryView() {
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [confirm, setConfirm] = useState<PublicClip | null>(null);
+  const [toasts, setToasts] = useState<Toast[]>([]);
+
+  function pushToast(toast: Omit<Toast, "id">) {
+    const id = crypto.randomUUID();
+    setToasts((current) => [...current.slice(-4), { ...toast, id }]);
+    window.setTimeout(() => {
+      setToasts((current) => current.filter((item) => item.id !== id));
+    }, 6000);
+  }
+
+  function dismissToast(id: string) {
+    setToasts((current) => current.filter((item) => item.id !== id));
+  }
 
   async function refresh() {
     const response = await fetch("/api/library", { cache: "no-store" });
@@ -101,28 +120,63 @@ export function LibraryView() {
   }
 
   async function confirmDelete(clip: PublicClip) {
+    // Optimistic delete: dismiss confirm modal and immediately remove the clip
+    // from state and URL so the UI doesn't stall waiting for remote storage deletion.
+    setConfirm(null);
+    setError(null);
+
+    const previousFamilies = families;
+    const previousSelectedRootId = selectedRootId;
+    const previousSelectedClipId = selectedClipId;
+
+    const optimisticFamilies = removeClipFromFamilies(families, clip);
+    setFamilies(optimisticFamilies);
+
+    if (clip.kind === "original") {
+      if (selectedRootId === clip.id) {
+        closeFamily();
+      }
+    } else if (selectedRootId !== null) {
+      const family = optimisticFamilies.find((item) => item.root.id === selectedRootId);
+      if (!family) {
+        closeFamily();
+      } else {
+        const fallback =
+          family.clips.find((item) => item.id === clip.parentClipId) ?? family.root;
+        setSelectedClipId(fallback.id);
+        const url = new URL(window.location.href);
+        url.searchParams.set("clip", fallback.id);
+        window.history.replaceState(null, "", url);
+      }
+    }
+
     setDeleting(true);
     try {
       const response = await fetch(`/api/clips/${clip.id}`, { method: "DELETE" });
       if (!response.ok) {
         throw new Error("Could not delete that clip.");
       }
-      const next = await refresh();
-      setConfirm(null);
-      if (clip.kind === "original") {
-        closeFamily();
-        return;
-      }
-      const family = next.find((item) => item.root.id === selectedRootId);
-      if (!family) {
-        closeFamily();
-        return;
-      }
-      const fallback =
-        family.clips.find((item) => item.id === clip.parentClipId) ?? family.root;
-      setSelectedClipId(fallback.id);
+      // Re-sync with server state after successful background delete
+      await refresh();
     } catch {
-      setError("Could not delete that clip.");
+      // Revert optimistic state and notify the user of the failure gracefully
+      setFamilies(previousFamilies);
+      setSelectedRootId(previousSelectedRootId);
+      setSelectedClipId(previousSelectedClipId);
+      if (previousSelectedClipId) {
+        const url = new URL(window.location.href);
+        url.searchParams.set("clip", previousSelectedClipId);
+        window.history.replaceState(null, "", url);
+      } else {
+        const url = new URL(window.location.href);
+        url.searchParams.delete("clip");
+        window.history.replaceState(null, "", url);
+      }
+      pushToast({
+        tone: "error",
+        title: "Delete failed",
+        body: `Could not delete "${clip.name}". The item has been restored.`,
+      });
     } finally {
       setDeleting(false);
     }
@@ -179,7 +233,6 @@ export function LibraryView() {
               family={family}
               onOpen={() => openFamily(family)}
               onDelete={setConfirm}
-              deleting={deleting && confirm?.id === family.root.id}
             />
           ))}
         </ul>
@@ -205,17 +258,15 @@ export function LibraryView() {
             <div className="mt-6 flex flex-wrap gap-2">
               <button
                 type="button"
-                disabled={deleting}
                 onClick={() => void confirmDelete(confirm)}
-                className="rounded-full bg-[var(--err)] px-4 py-2 text-xs uppercase tracking-[0.16em] text-white disabled:opacity-40"
+                className="rounded-full bg-[var(--err)] px-4 py-2 text-xs uppercase tracking-[0.16em] text-white hover:opacity-90"
               >
-                {deleting ? "Deleting…" : "Delete"}
+                Delete
               </button>
               <button
                 type="button"
-                disabled={deleting}
                 onClick={() => setConfirm(null)}
-                className="rounded-full border border-[var(--line)] px-4 py-2 text-xs uppercase tracking-[0.16em] text-[var(--muted)]"
+                className="rounded-full border border-[var(--line)] px-4 py-2 text-xs uppercase tracking-[0.16em] text-[var(--muted)] hover:text-[var(--ink)]"
               >
                 Keep
               </button>
@@ -223,6 +274,8 @@ export function LibraryView() {
           </div>
         </div>
       ) : null}
+
+      <ToastViewport toasts={toasts} onDismiss={dismissToast} />
     </section>
   );
 }
@@ -231,10 +284,9 @@ type FamilyCardProps = {
   family: LibraryFamily;
   onOpen: () => void;
   onDelete: (clip: PublicClip) => void;
-  deleting: boolean;
 };
 
-function FamilyCard({ family, onOpen, onDelete, deleting }: FamilyCardProps) {
+function FamilyCard({ family, onOpen, onDelete }: FamilyCardProps) {
   const [isHovered, setIsHovered] = useState(false);
   const [calculatedRatio, setCalculatedRatio] = useState<string | null>(null);
   const preview = latestVersion(family);
@@ -345,7 +397,6 @@ function FamilyCard({ family, onOpen, onDelete, deleting }: FamilyCardProps) {
           type="button"
           aria-label={`Delete ${family.root.name}`}
           title="Delete video"
-          disabled={deleting}
           onClick={(event) => {
             event.stopPropagation();
             onDelete(family.root);
@@ -353,7 +404,7 @@ function FamilyCard({ family, onOpen, onDelete, deleting }: FamilyCardProps) {
           onKeyDown={(event) => {
             event.stopPropagation();
           }}
-          className="absolute right-3 top-3 z-10 flex h-7 items-center gap-1.5 rounded-full bg-black/75 px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.16em] text-[var(--muted)] backdrop-blur-sm transition hover:bg-[var(--err)] hover:text-white focus:outline-none focus:ring-1 focus:ring-[var(--err)] disabled:opacity-40"
+          className="absolute right-3 top-3 z-10 flex h-7 items-center gap-1.5 rounded-full bg-black/75 px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.16em] text-[var(--muted)] backdrop-blur-sm transition hover:bg-[var(--err)] hover:text-white focus:outline-none focus:ring-1 focus:ring-[var(--err)]"
         >
           <svg
             xmlns="http://www.w3.org/2000/svg"
@@ -368,7 +419,7 @@ function FamilyCard({ family, onOpen, onDelete, deleting }: FamilyCardProps) {
               clipRule="evenodd"
             />
           </svg>
-          <span>{deleting ? "Deleting…" : "Delete"}</span>
+          <span>Delete</span>
         </button>
       </div>
       <div
