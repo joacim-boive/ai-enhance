@@ -27,6 +27,7 @@ type FfprobeStream = {
 type FfprobeFormat = {
   duration?: string;
   size?: string;
+  tags?: { rotate?: string };
 };
 
 type FfprobeResult = {
@@ -76,7 +77,7 @@ export async function probeVideo(filePath: string): Promise<VideoMeta> {
     parseFrameRate(video.avg_frame_rate) || parseFrameRate(video.r_frame_rate) || 24;
   const durationSec = Number(video.duration || parsed.format?.duration || 0);
   const frameCount = video.nb_frames ? Number(video.nb_frames) : null;
-  const rotation = rotationFromProbe(video);
+  const rotation = rotationFromProbe(video, parsed.format);
   const size = displaySize(video.width, video.height, rotation);
   return {
     width: size.width,

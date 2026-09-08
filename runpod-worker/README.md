@@ -10,7 +10,7 @@ This wrap:
 2. Caps short side at 2160, tiles the VAE (256–512), drops batch size, and swaps DiT blocks so 4K sources enhance in place instead of trying 8K.
 3. Honors `job.input.resolution` from the app (HFR / source-size jobs no longer get an unwanted 2×).
 4. When `scale_changed` is false (fps-only), strips SeedVR2 from the Hub graph so RIFE interpolates the source frames instead of running a 1× “upscale”.
-5. Sets RIFE’s integer multiplier so the **requested** fps is reachable. 24→60 is 2.5×, so RIFE runs 5× (timesteps 0.2/0.4/0.6/0.8) and the wrap keeps every 2nd frame — those are the exact 60 fps samples — then encodes **once** at 60. No second H.264 generation. 30→60 stays a single 2× pass.
+5. Sets RIFE’s integer multiplier so the **requested** fps is reachable. 24→60 is 2.5×, so RIFE runs 5× (120 fps). ffmpeg then keeps the 60 fps samples and, for phone clips, bakes the display rotation so a 9:16 source is not left as coded 16:9. 30→60 stays a single 2× pass with no extra encode.
 6. Waits for ComfyUI over HTTP history if the Hub websocket drops, so interpolation jobs are not marked GPU-unavailable.
 7. Streams the mp4 to the **presigned** `upload_url` the app minted for `users/{userId}/jobs/{jobId}/output.mp4`.
 8. Returns `{ object_key, byte_size, etag }` only. No bytes go back through RunPod or Next.js.
@@ -24,7 +24,7 @@ The worker never receives `R2_SECRET_ACCESS_KEY`. Single PUT under ~5 GB; multip
 Point the serverless start command at `bootstrap.sh`. It curls this directory from GitHub, replaces `/handler.py`, then execs the Hub entrypoint:
 
 ```text
-bash -c "curl -fsSL https://raw.githubusercontent.com/joacim-boive/ai-enhance/cursor/gpu-oom-vram-311c/runpod-worker/bootstrap.sh | bash"
+bash -c "curl -fsSL https://raw.githubusercontent.com/joacim-boive/ai-enhance/main/runpod-worker/bootstrap.sh | bash"
 ```
 
 Set `LUMEN_WORKER_REF` if the files live on another branch. After a wrap change, recycle the worker so the next boot curls the new `vram.py` / `wrap.py` / `progress.py`. The wrap now sends Runpod `progress_update` payloads (ComfyUI sample counts, then R2 upload) so the studio bar can follow the job instead of a fake timer.

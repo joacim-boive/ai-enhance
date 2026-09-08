@@ -3,7 +3,7 @@
 # Used as the endpoint start command, or by docker build (wrap.py is copied in then).
 set -euo pipefail
 
-REF="${LUMEN_WORKER_REF:-cursor/gpu-oom-vram-311c}"
+REF="${LUMEN_WORKER_REF:-main}"
 BASE="https://raw.githubusercontent.com/joacim-boive/ai-enhance/${REF}/runpod-worker"
 
 mkdir -p /opt/lumen

@@ -46,12 +46,10 @@ test("rotation metadata swaps coded 16:9 phone video to display 9:16", () => {
     90,
   );
   assert.equal(
-    rotationFromProbe({
-      tags: { rotate: "90" },
-      side_data_list: [{ side_data_type: "Display Matrix", rotation: -90 }],
-    }),
+    rotationFromProbe({ tags: { rotate: "90" } }, { tags: { rotate: "90" } }),
     90,
   );
+  assert.equal(rotationFromProbe({}, { tags: { rotate: "90" } }), 90);
   assert.deepEqual(displaySize(3840, 2160, 90), { width: 2160, height: 3840 });
   assert.deepEqual(displaySize(3840, 2160, 270), { width: 2160, height: 3840 });
   assert.deepEqual(displaySize(3840, 2160, 0), { width: 3840, height: 2160 });

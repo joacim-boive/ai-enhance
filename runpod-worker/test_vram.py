@@ -2,7 +2,6 @@ import copy
 import unittest
 
 from vram import (
-    LumenDecimateImages,
     apply_rife_fps,
     bypass_seedvr2,
     cap_resolution,
@@ -111,7 +110,7 @@ class VramTests(unittest.TestCase):
         self.assertEqual(plan.rife_fps, 120)
         self.assertEqual(plan.output_fps, 60)
         self.assertEqual(plan.decimate, 2)
-        self.assertFalse(plan.resample)
+        self.assertTrue(plan.resample)
         multiplier, dense = rife_output_fps(24, 60)
         self.assertEqual(multiplier, 5)
         self.assertEqual(dense, 120)
@@ -130,11 +129,7 @@ class VramTests(unittest.TestCase):
         plan = rife_fps_plan(23.976, 59.94)
         self.assertEqual(plan.multiplier, 5)
         self.assertEqual(plan.decimate, 2)
-        self.assertFalse(plan.resample)
-
-    def test_decimate_keeps_even_rife_indexes(self) -> None:
-        kept, = LumenDecimateImages().decimate(list(range(10)), 2)
-        self.assertEqual(kept, [0, 2, 4, 6, 8])
+        self.assertTrue(plan.resample)
 
     def test_fps_only_sets_rife_multiplier_and_output_rate(self) -> None:
         patched = patch_seedvr2_prompt(
@@ -151,7 +146,7 @@ class VramTests(unittest.TestCase):
         self.assertEqual(patched["25"]["inputs"]["frame_rate"], 60)
         apply_rife_fps(patched, {"fps": 60, "source_fps": 30})
 
-    def test_fps_only_24_to_60_keeps_every_second_frame_then_encodes_60(self) -> None:
+    def test_fps_only_24_to_60_encodes_120_for_ffmpeg_decimate(self) -> None:
         patched = patch_seedvr2_prompt(
             copy.deepcopy(INTERP_PROMPT),
             {
@@ -162,10 +157,9 @@ class VramTests(unittest.TestCase):
             },
         )
         self.assertEqual(patched["26"]["inputs"]["multiplier"], 5)
-        self.assertEqual(patched["25"]["inputs"]["frame_rate"], 60)
-        self.assertEqual(patched["25"]["inputs"]["images"], ["lumen_decimate_25", 0])
-        self.assertEqual(patched["lumen_decimate_25"]["inputs"]["every"], 2)
-        self.assertEqual(patched["lumen_decimate_25"]["inputs"]["images"], ["26", 0])
+        self.assertEqual(patched["25"]["inputs"]["frame_rate"], 120)
+        self.assertEqual(patched["25"]["inputs"]["images"], ["26", 0])
+        self.assertNotIn("lumen_decimate_25", patched)
         self.assertNotIn("10", patched)
 
     def test_upscale_and_fps_still_sets_rife_for_24_to_60(self) -> None:
@@ -181,8 +175,8 @@ class VramTests(unittest.TestCase):
         )
         self.assertIn("10", patched)
         self.assertEqual(patched["26"]["inputs"]["multiplier"], 5)
-        self.assertEqual(patched["25"]["inputs"]["frame_rate"], 60)
-        self.assertEqual(patched["25"]["inputs"]["images"][0], "lumen_decimate_25")
+        self.assertEqual(patched["25"]["inputs"]["frame_rate"], 120)
+        self.assertEqual(patched["25"]["inputs"]["images"][0], "26")
 
 if __name__ == "__main__":
     unittest.main()
