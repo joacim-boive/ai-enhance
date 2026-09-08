@@ -4,7 +4,7 @@ import { isVercel, missingR2Message, r2Enabled } from "@/lib/env";
 import { ensureOriginalClip, loadClip } from "@/lib/clips";
 import { createJob, listJobs, toPublicJob } from "@/lib/jobs";
 import { jobOutputKey, mediaJobUrl } from "@/lib/keys";
-import { getQueueStatus, startJob, submitGpuIfReady } from "@/lib/processor";
+import { getQueueStatus, followActiveGpuJobs, startJob, submitGpuIfReady } from "@/lib/processor";
 import { sessionSecretConfigured } from "@/lib/session";
 import { DEFAULT_SETTINGS } from "@/lib/settings";
 import { loadStoredFile } from "@/lib/storage";
@@ -23,6 +23,7 @@ type CreateBody = {
 
 export async function GET(): Promise<Response> {
   const session = await requireSession();
+  await followActiveGpuJobs(session.userId);
   const jobs = await listJobs(session.userId);
   const queue = getQueueStatus();
   return NextResponse.json({ jobs: jobs.map(toPublicJob), queue });

@@ -6,6 +6,7 @@ import {
   appendEvent,
   clearAbortController,
   getAbortController,
+  listJobs,
   loadJob,
   patchJob,
 } from "./jobs";
@@ -28,8 +29,11 @@ import {
 } from "./job-lifecycle";
 import {
   cancelGpuJob,
+  collectGpuErrorText,
   getGpuJobStatus,
   gpuFailureMessage,
+  gpuJobFollowKind,
+  gpuOutputError,
   gpuOutputLooksLikeBytes,
   gpuWarmupMessage,
   isGpuConfigured,
@@ -661,6 +665,15 @@ async function failJob(id: string, message: string): Promise<void> {
   clearAbortController(id);
 }
 
+export async function followActiveGpuJobs(userId: string): Promise<void> {
+  const jobs = await listJobs(userId);
+  for (const job of jobs) {
+    if (jobNeedsGpuFollow(job)) {
+      await resumeGpuJob(job.id);
+    }
+  }
+}
+
 export async function resumeGpuJob(id: string): Promise<void> {
   const job = await loadJob(id);
   if (
@@ -676,11 +689,26 @@ export async function resumeGpuJob(id: string): Promise<void> {
   }
   try {
     const status = await getGpuJobStatus(job.runpodJobId);
-    if (status.status !== "COMPLETED") {
+    const follow = gpuJobFollowKind(status.status);
+    if (follow === "wait") {
       return;
     }
-    await persistGpuObject(job, status.output);
-    await completeJob(id, "gpu", null, null);
+    if (follow === "fail") {
+      await failJob(id, gpuFailureMessage(collectGpuErrorText(status), status.status));
+      return;
+    }
+    const completedError = gpuOutputError(status.output);
+    if (completedError) {
+      await failJob(id, gpuFailureMessage(completedError));
+      return;
+    }
+    try {
+      await persistGpuObject(job, status.output);
+      await completeJob(id, "gpu", null, null);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "GPU finished without a usable master.";
+      await failJob(id, gpuFailureMessage(message));
+    }
   } catch (error) {
     console.error(`GPU resume failed for ${id}`, error);
   }
