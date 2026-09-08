@@ -1,4 +1,5 @@
 import { missingGpuKeyMessage, r2Enabled, runtimeEnv } from "./env";
+import { GPU_QUEUE_HARD_TIMEOUT_MS, shouldExtendGpuQueueWait } from "./job-lifecycle";
 import type { HealthStatus } from "./types";
 
 const DEFAULT_ENDPOINT = "tbsk82cmm6azwh";
@@ -76,6 +77,46 @@ export async function gpuHealth(): Promise<HealthStatus["gpu"]> {
       ? "GPU is on demand. The first enhance job warms an RTX 4090."
       : "GPU is configured, but Cloudflare R2 is missing. The worker cannot land a private master without a presigned upload.",
   };
+}
+
+type RunpodHealth = {
+  workers?: {
+    idle?: number;
+    running?: number;
+    initializing?: number;
+    throttled?: number;
+    ready?: number;
+  };
+};
+
+async function fetchGpuWorkers(): Promise<{
+  idle: number;
+  running: number;
+  initializing: number;
+  throttled: number;
+} | null> {
+  const { apiKey, endpointId } = runpodConfig();
+  if (!apiKey) {
+    return null;
+  }
+  try {
+    const response = await fetch(`https://api.runpod.ai/v2/${endpointId}/health`, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+      cache: "no-store",
+    });
+    if (!response.ok) {
+      return null;
+    }
+    const data = (await response.json()) as RunpodHealth;
+    return {
+      idle: data.workers?.idle ?? 0,
+      running: data.workers?.running ?? 0,
+      initializing: data.workers?.initializing ?? 0,
+      throttled: data.workers?.throttled ?? 0,
+    };
+  } catch {
+    return null;
+  }
 }
 
 function taskTypeFor(scaleChanged: boolean, fpsChanged: boolean): "upscale" | "upscale_and_interpolation" {
@@ -188,13 +229,23 @@ export async function pollGpuJob(
     ) {
       throw new Error(gpuFailureMessage(collectGpuErrorText(data), data.status));
     }
-    if (
-      (data.status === "IN_QUEUE" || !data.status) &&
-      Date.now() - started > GPU_QUEUE_TIMEOUT_MS
-    ) {
-      throw new Error(
-        "GPU worker stayed queued while pulling the image. Falling back to CPU.",
-      );
+    if (data.status === "IN_QUEUE" || !data.status) {
+      const elapsedMs = Date.now() - started;
+      if (elapsedMs > GPU_QUEUE_TIMEOUT_MS) {
+        const workers = await fetchGpuWorkers();
+        if (
+          !shouldExtendGpuQueueWait({
+            elapsedMs,
+            timeoutMs: GPU_QUEUE_TIMEOUT_MS,
+            hardTimeoutMs: GPU_QUEUE_HARD_TIMEOUT_MS,
+            workers,
+          })
+        ) {
+          throw new Error(
+            "GPU worker stayed queued while pulling the image. Falling back to CPU.",
+          );
+        }
+      }
     }
     await sleep(2000, signal);
   }

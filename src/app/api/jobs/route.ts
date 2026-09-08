@@ -4,7 +4,7 @@ import { isVercel, missingR2Message, r2Enabled } from "@/lib/env";
 import { ensureOriginalClip, loadClip } from "@/lib/clips";
 import { createJob, listJobs, toPublicJob } from "@/lib/jobs";
 import { jobOutputKey, mediaJobUrl } from "@/lib/keys";
-import { startJob } from "@/lib/processor";
+import { startJob, submitGpuIfReady } from "@/lib/processor";
 import { sessionSecretConfigured } from "@/lib/session";
 import { DEFAULT_SETTINGS } from "@/lib/settings";
 import { loadStoredFile } from "@/lib/storage";
@@ -85,9 +85,10 @@ export async function POST(request: Request): Promise<Response> {
     completedAt: null,
     startedAt: null,
   };
-  await createJob(job);
-  startJob(id);
-  return NextResponse.json({ job: toPublicJob(job) }, { status: 201 });
+  const created = await createJob(job);
+  const dispatched = await submitGpuIfReady(created);
+  startJob(dispatched.id);
+  return NextResponse.json({ job: toPublicJob(dispatched) }, { status: 201 });
 }
 
 async function resolveJobSource(
@@ -114,5 +115,7 @@ async function resolveJobSource(
     url: stored.url,
     pathname: stored.pathname,
     objectKey: stored.objectKey ?? null,
+    thumbs: stored.thumbs,
+    meta: stored.meta ?? null,
   });
 }

@@ -7,6 +7,7 @@ import { uploadPrefix, uploadRecordKey } from "./keys";
 import { DATA_DIR, ensureDirs } from "./paths";
 import { deleteObject, deletePrefix, getJsonObject, listObjectKeys, putJsonObject } from "./r2";
 import { SAMPLE_FILE_ID, SAMPLE_STORED_FILE } from "./sample";
+import type { VideoMeta } from "./types";
 
 export type StoredFile = {
   id: string;
@@ -15,6 +16,8 @@ export type StoredFile = {
   pathname: string;
   userId?: string;
   objectKey?: string;
+  meta?: VideoMeta;
+  thumbs?: string[];
 };
 
 function localFile(pathname: string): string {

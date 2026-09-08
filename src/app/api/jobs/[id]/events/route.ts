@@ -1,10 +1,10 @@
 import { requireOwnedJob } from "@/lib/authz";
-import { subscribe, toPublicJob } from "@/lib/jobs";
-import { resumeGpuJob } from "@/lib/processor";
+import { loadJob, subscribe, toPublicJob } from "@/lib/jobs";
+import { ensureJobRunning, resumeGpuJob } from "@/lib/processor";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 300;
+export const maxDuration = 800;
 
 type RouteContext = {
   params: Promise<{ id: string }>;
@@ -20,6 +20,8 @@ export async function GET(
     return new Response("Job not found", { status: 404 });
   }
   await resumeGpuJob(id);
+  await ensureJobRunning(id);
+  const latest = (await loadJob(id)) ?? job;
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream<Uint8Array>({
@@ -29,7 +31,7 @@ export async function GET(
           encoder.encode(`data: ${JSON.stringify(payload)}\n\n`),
         );
       };
-      send(toPublicJob(job));
+      send(toPublicJob(latest));
       const unsubscribe = subscribe(id, (next) => {
         if (next.userId === job.userId) {
           send(toPublicJob(next));
