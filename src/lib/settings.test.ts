@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  DEFAULT_SETTINGS,
   gpuHubResolution,
   outputSizeNotice,
   preferGpuEngine,
@@ -133,4 +134,8 @@ test("treatment labels describe presets and custom fps runs", () => {
   assert.equal(treatmentLabel(custom), "120 fps · Denoise");
   assert.equal(treatmentSlug(custom), "120fps-denoise");
   assert.equal(versionFileName("sunset.mov", custom), "sunset-120fps-denoise.mov");
+});
+
+test("default resolution scale is Source (none)", () => {
+  assert.equal(DEFAULT_SETTINGS.scale, "none");
 });
