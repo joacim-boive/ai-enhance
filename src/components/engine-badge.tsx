@@ -48,16 +48,14 @@ export function EngineBadge({ health }: Props) {
   const gpu = resolved.gpu;
   const gpuTone = gpu.alert
     ? "text-[var(--gold)]"
-    : gpu.configured && gpu.ready
+    : gpu.configured
       ? "text-[var(--teal)]"
       : "text-[var(--muted)]";
   const gpuLabel = !gpu.configured
     ? "GPU unset"
-    : gpu.ready
-      ? "GPU ready"
-      : gpu.alert
-        ? "GPU issue"
-        : "GPU cold";
+    : gpu.alert
+      ? "GPU issue"
+      : "GPU set";
   const cpuLabel = resolved.ffmpeg.ok ? "CPU ready" : "CPU missing";
   const r2Ready = Boolean(resolved.r2?.configured && resolved.session?.configured);
   const storageLabel = r2Ready

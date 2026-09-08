@@ -34,16 +34,6 @@ type RunpodStatusResponse = {
   error?: string;
 };
 
-type RunpodHealth = {
-  workers?: {
-    idle?: number;
-    running?: number;
-    initializing?: number;
-    throttled?: number;
-    ready?: number;
-  };
-};
-
 export function gpuShouldAlert(input: {
   configured: boolean;
   r2Ready: boolean;
@@ -73,67 +63,19 @@ export async function gpuHealth(): Promise<HealthStatus["gpu"]> {
       message: missingGpuKeyMessage(),
     };
   }
-  try {
-    const response = await fetch(`https://api.runpod.ai/v2/${endpointId}/health`, {
-      headers: { Authorization: `Bearer ${apiKey}` },
-      cache: "no-store",
-    });
-    if (!response.ok) {
-      return {
-        configured: true,
-        endpointId,
-        ready: false,
-        alert: true,
-        workers: null,
-        message: `GPU endpoint returned ${response.status}. Jobs will fall back to CPU.`,
-      };
-    }
-    const data = (await response.json()) as RunpodHealth;
-    const workers = {
-      idle: data.workers?.idle ?? 0,
-      running: data.workers?.running ?? 0,
-      initializing: data.workers?.initializing ?? 0,
-      throttled: data.workers?.throttled ?? 0,
-    };
-    const ready = workers.idle + workers.running > 0;
-    const r2Ready = r2Enabled();
-    let message = "GPU is cold. The first job warms a worker, then runs SeedVR2 + RIFE.";
-    if (!r2Ready) {
-      message =
-        "GPU is configured, but Cloudflare R2 is missing. The worker cannot land a private master without a presigned upload.";
-    } else if (ready) {
-      message = "GPU workers are available.";
-    } else if (workers.initializing > 0) {
-      message =
-        "GPU worker is starting. The Hub image is pulling onto an RTX 4090 — first boot can take several minutes.";
-    } else if (workers.throttled > 0) {
-      message = "GPU capacity is throttled. Jobs will wait or fall back to CPU.";
-    }
-    return {
-      configured: true,
-      endpointId,
-      ready: r2Ready ? ready : false,
-      alert: gpuShouldAlert({
-        configured: true,
-        r2Ready,
-        reachable: true,
-        httpOk: true,
-        ready,
-        throttled: workers.throttled,
-      }),
-      workers,
-      message,
-    };
-  } catch {
-    return {
-      configured: true,
-      endpointId,
-      ready: false,
-      alert: true,
-      workers: null,
-      message: "Could not reach Runpod. CPU fallback will be used.",
-    };
-  }
+  const r2Ready = r2Enabled();
+  // Do not GET Runpod /health from the studio poll. That ping can reset
+  // idle timeout and leave a 4090 billed after a job (or a config change).
+  return {
+    configured: true,
+    endpointId,
+    ready: false,
+    alert: !r2Ready,
+    workers: null,
+    message: r2Ready
+      ? "GPU is on demand. The first enhance job warms an RTX 4090."
+      : "GPU is configured, but Cloudflare R2 is missing. The worker cannot land a private master without a presigned upload.",
+  };
 }
 
 function taskTypeFor(scaleChanged: boolean, fpsChanged: boolean): "upscale" | "upscale_and_interpolation" {
