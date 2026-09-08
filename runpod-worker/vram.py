@@ -2,7 +2,8 @@
 
 The Hub handler always sets resolution = min(width, height) * 2 and encodes with
 batch_size 33 / VAE tiles 1024. A 4K clip becomes 8K and dies in Phase 1 with
-`Allocation on device`.
+`Allocation on device`. Even at 2160, SeedVR2 encodes every frame of the clip
+before DiT runs, so 4K jobs are split into 5-frame windows on the 4090.
 """
 
 from __future__ import annotations
@@ -26,6 +27,12 @@ SELECT_NTH_TYPE = "VHS_SelectEveryNthImage"
 MAX_RIFE_MULTIPLIER = 8
 RIFE_RAM_BUDGET_BYTES = 6 * 1024 * 1024 * 1024
 RIFE_CHUNK_OVERLAP_FRAMES = 1
+# SeedVR2 Phase 1 encodes every frame of the clip it is given. A 10s 4K
+# IMAGE tensor is ~30 GB on the 4090 even with VAE tiling, so 4K jobs are
+# split into 4n+1 frame windows (SeedVR2's temporal batch constraint).
+SEEDVR2_4K_CHUNK_FRAMES = 5
+SEEDVR2_1440_CHUNK_FRAMES = 9
+SEEDVR2_7B_SHARP = "seedvr2_ema_7b_sharp_fp8_e4m3fn_mixed_block35_fp16.safetensors"
 
 
 def max_short_side() -> int:
@@ -217,6 +224,57 @@ def wants_rife_preprocess(job_input: dict[str, Any] | None) -> bool:
     return rife_fps_plan(source, target).multiplier >= 2
 
 
+def seedvr2_chunk_source_frames(width: int, height: int) -> int:
+    """How many source frames SeedVR2 can encode on a 24 GB 4090."""
+    short = min(max(1, int(width)), max(1, int(height)))
+    pixels = max(1, int(width)) * max(1, int(height))
+    if short >= 2160 or pixels >= 2160 * 3840:
+        return SEEDVR2_4K_CHUNK_FRAMES
+    if short >= 1440 or pixels >= 1440 * 2560:
+        return SEEDVR2_1440_CHUNK_FRAMES
+    return 33
+
+
+def needs_seedvr2_chunking(
+    job_input: dict[str, Any] | None,
+    source_frames: int | None = None,
+) -> bool:
+    if should_skip_upscale(job_input):
+        return False
+    dims = rife_working_dimensions(job_input)
+    if dims is None:
+        return False
+    width, height = dims
+    chunk = seedvr2_chunk_source_frames(width, height)
+    if chunk >= 33:
+        return False
+    frames = source_frames if source_frames is not None else clip_source_frames(job_input)
+    if frames is None:
+        return True
+    return frames > chunk
+
+
+def gpu_chunk_source_frames(job_input: dict[str, Any] | None) -> int | None:
+    """Tightest source-frame window across SeedVR2 VRAM and RIFE RAM."""
+    sizes: list[int] = []
+    if needs_seedvr2_chunking(job_input):
+        dims = rife_working_dimensions(job_input)
+        if dims is not None:
+            sizes.append(seedvr2_chunk_source_frames(dims[0], dims[1]))
+    if needs_rife_chunking(job_input):
+        plan = job_rife_plan(job_input)
+        dims = rife_working_dimensions(job_input)
+        if plan is not None and dims is not None:
+            sizes.append(rife_chunk_source_frames(dims[0], dims[1], plan.multiplier))
+    if not sizes:
+        return None
+    return max(2, min(sizes))
+
+
+def wants_gpu_preprocess(job_input: dict[str, Any] | None) -> bool:
+    return wants_rife_preprocess(job_input) or needs_seedvr2_chunking(job_input)
+
+
 def needs_rife_chunking(
     job_input: dict[str, Any] | None,
     source_frames: int | None = None,
@@ -333,21 +391,26 @@ def apply_rife_fps(prompt: dict[str, Any], job_input: dict[str, Any] | None) -> 
 
 
 def _vram_profile(resolution: int) -> dict[str, Any]:
+    # batch_size must be 4n+1 (SeedVR2 temporal window). 1 is for stills.
     if resolution >= 2160:
         return {
-            "batch_size": 1,
+            "batch_size": 5,
             "encode_tile_size": 256,
             "decode_tile_size": 256,
             "tile_overlap": 32,
             "blocks_to_swap": 36,
+            "temporal_overlap": 1,
+            "uniform_batch_size": False,
         }
     if resolution >= 1440:
         return {
-            "batch_size": 1,
-            "encode_tile_size": 512,
-            "decode_tile_size": 512,
-            "tile_overlap": 64,
-            "blocks_to_swap": 32,
+            "batch_size": 5,
+            "encode_tile_size": 256,
+            "decode_tile_size": 256,
+            "tile_overlap": 32,
+            "blocks_to_swap": 36,
+            "temporal_overlap": 1,
+            "uniform_batch_size": False,
         }
     return {
         "batch_size": 5,
@@ -355,6 +418,8 @@ def _vram_profile(resolution: int) -> dict[str, Any]:
         "decode_tile_size": 512,
         "tile_overlap": 64,
         "blocks_to_swap": 32,
+        "temporal_overlap": 1,
+        "uniform_batch_size": True,
     }
 
 
@@ -466,6 +531,8 @@ def patch_seedvr2_prompt(
         if class_type == UPSCALER_TYPE:
             inputs["resolution"] = resolution
             inputs["batch_size"] = profile["batch_size"]
+            inputs["temporal_overlap"] = profile["temporal_overlap"]
+            inputs["uniform_batch_size"] = profile["uniform_batch_size"]
             inputs["offload_device"] = "cpu"
         elif class_type == VAE_TYPE:
             inputs["encode_tiled"] = True
@@ -476,6 +543,7 @@ def patch_seedvr2_prompt(
             inputs["decode_tile_overlap"] = profile["tile_overlap"]
             inputs["offload_device"] = "cpu"
         elif class_type == DIT_TYPE:
+            inputs["model"] = inputs.get("model") or SEEDVR2_7B_SHARP
             inputs["blocks_to_swap"] = profile["blocks_to_swap"]
             inputs["swap_io_components"] = True
             inputs["offload_device"] = "cpu"

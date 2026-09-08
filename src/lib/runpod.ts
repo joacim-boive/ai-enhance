@@ -641,7 +641,7 @@ export function gpuFailureMessage(text: string, status?: string): string {
     return "GPU worker ran out of RAM interpolating this clip. Retry the job — 24→60 runs RIFE in overlapping chunks so the whole clip is not 5× in memory at once.";
   }
   if (isGpuOom(extracted)) {
-    return "GPU ran out of VRAM during SeedVR2 encoding (Allocation on device). 4K clips stay at 4K on the RTX 4090; retry at source size or a lower scale.";
+    return "GPU ran out of VRAM during SeedVR2 encoding (Allocation on device). Retry the job — 4K now runs SeedVR2 in short overlapping windows on the RTX 4090 instead of loading the whole clip at once.";
   }
   if (isGpuWebsocketDrop(extracted)) {
     return "GPU interpolation lost its ComfyUI connection. Retry the job — it stays on the RTX 4090 (CPU fallback is off).";
