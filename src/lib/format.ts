@@ -76,11 +76,26 @@ export function displaySize(
   height: number,
   rotation = 0,
 ): { width: number; height: number } {
+  // Reels / Shorts / TikTok are coded portrait. Do not swap them.
+  if (height > width) {
+    return { width, height };
+  }
   const turns = normalizeRotation(rotation);
   if (turns === 90 || turns === 270) {
     return { width: height, height: width };
   }
   return { width, height };
+}
+
+export function codedNeedsTranspose(width: number, height: number, rotation = 0): number {
+  if (height > width) {
+    return 0;
+  }
+  const turns = normalizeRotation(rotation);
+  if (turns === 90 || turns === 270 || turns === 180) {
+    return turns;
+  }
+  return 0;
 }
 
 export function transposeFilter(rotation = 0): string | null {

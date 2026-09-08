@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   aspectRatioForMeta,
   aspectRatioNumber,
+  codedNeedsTranspose,
   compareFrameAspect,
   displaySize,
   formatCodec,
@@ -58,6 +59,15 @@ test("rotation metadata swaps coded 16:9 phone video to display 9:16", () => {
   assert.equal(transposeFilter(90), "transpose=1");
   assert.equal(transposeFilter(270), "transpose=2");
   assert.equal(transposeFilter(0), null);
+});
+
+test("native 9:16 reels keep coded size even if a rotate tag is present", () => {
+  assert.deepEqual(displaySize(1080, 1920, 0), { width: 1080, height: 1920 });
+  assert.deepEqual(displaySize(1080, 1920, 90), { width: 1080, height: 1920 });
+  assert.deepEqual(displaySize(2160, 3840, 270), { width: 2160, height: 3840 });
+  assert.equal(codedNeedsTranspose(1080, 1920, 90), 0);
+  assert.equal(codedNeedsTranspose(3840, 2160, 90), 90);
+  assert.equal(compareFrameAspect({ width: 1080, height: 1920 }, "split"), "1080 / 1920");
 });
 
 test("compare overlay keeps source aspect and doubles it for side-by-side", () => {

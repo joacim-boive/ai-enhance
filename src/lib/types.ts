@@ -28,7 +28,7 @@ export type VideoMeta = {
   sizeBytes: number;
   frameCount: number | null;
   pixelFormat: string | null;
-  /** Clockwise degrees needed to show the coded pixels upright. */
+  /** Clockwise degrees to bake when coded pixels are landscape. Native 9:16 is 0. */
   rotation?: number;
 };
 

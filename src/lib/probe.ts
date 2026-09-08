@@ -3,7 +3,7 @@ import { mkdir, readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { ffmpegBin, ffprobeBin } from "./binaries";
 import { isVercel, r2Enabled } from "./env";
-import { displaySize, parseFrameRate, rotationFromProbe, transposeFilter } from "./format";
+import { displaySize, parseFrameRate, rotationFromProbe, codedNeedsTranspose, transposeFilter } from "./format";
 import { jobThumbKey, mediaJobThumbUrl, mediaUploadThumbUrl, uploadThumbKey } from "./keys";
 import { putBytesToR2 } from "./r2";
 import { saveBytes } from "./storage";
@@ -76,8 +76,9 @@ export async function probeVideo(filePath: string): Promise<VideoMeta> {
     parseFrameRate(video.avg_frame_rate) || parseFrameRate(video.r_frame_rate) || 24;
   const durationSec = Number(video.duration || parsed.format?.duration || 0);
   const frameCount = video.nb_frames ? Number(video.nb_frames) : null;
-  const rotation = rotationFromProbe(video);
-  const size = displaySize(video.width, video.height, rotation);
+  const probedRotation = rotationFromProbe(video);
+  const rotation = codedNeedsTranspose(video.width, video.height, probedRotation);
+  const size = displaySize(video.width, video.height, probedRotation);
   return {
     width: size.width,
     height: size.height,

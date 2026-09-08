@@ -58,6 +58,10 @@ test("named resolutions fit portrait sources to the UHD box, not a landscape box
   const cinema = resolveOutputTarget(portrait, settingsFromPreset("cinema"));
   assert.equal(cinema.width, 2160);
   assert.equal(cinema.height, 3840);
+  const reel4k: VideoMeta = { ...meta, width: 2160, height: 3840 };
+  const reelCinema = resolveOutputTarget(reel4k, settingsFromPreset("cinema"));
+  assert.equal(reelCinema.width, 2160);
+  assert.equal(reelCinema.height, 3840);
   const small: VideoMeta = { ...meta, width: 720, height: 1280 };
   const hd = resolveOutputTarget(small, withCustomOverride(DEFAULT_SETTINGS, { scale: "1080p" }));
   assert.equal(hd.width, 1080);
