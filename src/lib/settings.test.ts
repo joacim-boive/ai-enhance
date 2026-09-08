@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   DEFAULT_SETTINGS,
   gpuHubResolution,
+  isNoOp,
   outputSizeNotice,
   preferGpuEngine,
   resolveOutputTarget,
@@ -138,4 +139,15 @@ test("treatment labels describe presets and custom fps runs", () => {
 
 test("default resolution scale is Source (none)", () => {
   assert.equal(DEFAULT_SETTINGS.scale, "none");
+});
+
+test("default settings is source with no denoise or sharpen", () => {
+  assert.equal(DEFAULT_SETTINGS.scale, "none");
+  assert.equal(DEFAULT_SETTINGS.fps, "keep");
+  assert.equal(DEFAULT_SETTINGS.denoise, false);
+  assert.equal(DEFAULT_SETTINGS.sharpen, false);
+  assert.equal(isNoOp(meta, DEFAULT_SETTINGS), true);
+  assert.equal(treatmentLabel(DEFAULT_SETTINGS), "Source");
+  assert.equal(treatmentSlug(DEFAULT_SETTINGS), "source");
+  assert.equal(versionFileName("sunset.mov", DEFAULT_SETTINGS), "sunset-source.mov");
 });

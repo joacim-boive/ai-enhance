@@ -78,7 +78,7 @@ export const DEFAULT_SETTINGS: JobSettings = {
   preset: "custom",
   scale: "none",
   fps: "keep",
-  denoise: true,
+  denoise: false,
   sharpen: false,
   enginePreference: "auto",
 };
@@ -333,7 +333,7 @@ export function treatmentLabel(settings: JobSettings | null | undefined): string
   if (settings.sharpen) {
     bits.push("Sharpen");
   }
-  return bits.length > 0 ? bits.join(" · ") : "Custom";
+  return bits.length > 0 ? bits.join(" · ") : "Source";
 }
 
 export function treatmentSlug(settings: JobSettings | null | undefined): string {
@@ -353,7 +353,7 @@ export function treatmentSlug(settings: JobSettings | null | undefined): string 
   if (settings.sharpen) {
     parts.push("sharpen");
   }
-  return parts.join("-") || settings.preset;
+  return parts.join("-") || (settings.preset === "custom" ? "source" : settings.preset);
 }
 
 export function versionFileName(originalName: string, settings: JobSettings | null | undefined): string {
