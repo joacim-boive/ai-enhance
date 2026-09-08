@@ -44,7 +44,7 @@ export function missingGpuKeyMessage(environment: HostEnvironment = hostEnvironm
   if (environment === "production") {
     return "RUNPOD_API_KEY is missing on Production. Add it in Vercel → Settings → Environment Variables for Production, then Redeploy.";
   }
-  return "Add RUNPOD_API_KEY to .env.local to enable GPU processing. CPU fallback is active.";
+  return "Add RUNPOD_API_KEY to .env.local to enable GPU processing.";
 }
 
 export function missingR2Message(environment: HostEnvironment = hostEnvironment()): string {

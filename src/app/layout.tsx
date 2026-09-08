@@ -24,7 +24,7 @@ export const preferredRegion = "fra1"; // Europe — never US defaults
 export const metadata: Metadata = {
   title: "Lumen Enhance — studio-grade video restoration",
   description:
-    "Upscale footage and lift frame rate with live processing feedback. GPU SeedVR2 + RIFE, with a graceful CPU fallback.",
+    "Upscale footage and lift frame rate with live processing feedback. GPU SeedVR2 + RIFE on an RTX 4090.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
