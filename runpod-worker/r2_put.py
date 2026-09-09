@@ -16,6 +16,7 @@ import base64
 
 PUT_LIMIT = 5 * 1024 * 1024 * 1024 - 16 * 1024 * 1024
 INLINE_LIMIT = 12 * 1024 * 1024
+EVEN_SCALE = "scale=trunc(iw/2)*2:trunc(ih/2)*2"
 SEARCH_DIRS = (
     "/ComfyUI/output",
     "/workspace/ComfyUI/output",
@@ -65,49 +66,80 @@ def upload_master(job_input: dict[str, Any], output: Any) -> dict[str, Any]:
 
 
 def probe_video(path: str) -> dict[str, Any]:
+    commands = (
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=width,height,r_frame_rate,avg_frame_rate,nb_frames,tags",
+            "-show_entries",
+            "stream_side_data",
+            "-show_entries",
+            "format=duration,size:format_tags",
+            "-of",
+            "json",
+            path,
+        ],
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=width,height,r_frame_rate,avg_frame_rate,nb_frames",
+            "-show_entries",
+            "format=duration,size",
+            "-of",
+            "json",
+            path,
+        ],
+    )
+    last_error: Exception | None = None
+    for command in commands:
+        try:
+            parsed = _parse_ffprobe(command)
+        except Exception as error:
+            last_error = error
+            continue
+        if parsed.get("width"):
+            print(f"Lumen wrap: output probe {parsed}", flush=True)
+            return parsed
+        last_error = RuntimeError("ffprobe returned no video stream")
+    print(f"Lumen wrap: ffprobe failed: {last_error}", flush=True)
+    return {}
+
+
+def _parse_ffprobe(command: list[str]) -> dict[str, Any]:
+    proc = subprocess.run(command, capture_output=True, text=True, timeout=30)
+    raw = (proc.stdout or "").strip()
+    if not raw:
+        err = (proc.stderr or "").strip() or f"ffprobe exit {proc.returncode}"
+        raise RuntimeError(err)
     try:
-        raw = subprocess.check_output(
-            [
-                "ffprobe",
-                "-v",
-                "error",
-                "-select_streams",
-                "v:0",
-                "-show_entries",
-                "stream=width,height,r_frame_rate,avg_frame_rate,nb_frames,tags",
-                "-show_entries",
-                "stream_side_data",
-                "-show_entries",
-                "format=duration,size:format_tags",
-                "-of",
-                "json",
-                path,
-            ],
-            text=True,
-            timeout=30,
-        )
         data = json.loads(raw)
-        stream = (data.get("streams") or [{}])[0]
-        fmt = data.get("format") or {}
-        rate = None
-        if isinstance(stream, dict):
-            rate = stream.get("r_frame_rate") or stream.get("avg_frame_rate")
-        fps = _fps_from_rate(rate if isinstance(rate, str) else None)
-        info: dict[str, Any] = {
-            "width": stream.get("width") if isinstance(stream, dict) else None,
-            "height": stream.get("height") if isinstance(stream, dict) else None,
-            "fps": fps,
-            "frame_rate": rate,
-            "frames": stream.get("nb_frames") if isinstance(stream, dict) else None,
-            "duration": fmt.get("duration") if isinstance(fmt, dict) else None,
-            "size": fmt.get("size") if isinstance(fmt, dict) else None,
-        }
-        cleaned = {key: value for key, value in info.items() if value not in (None, "")}
-        print(f"Lumen wrap: output probe {cleaned}", flush=True)
-        return cleaned
-    except Exception as error:
-        print(f"Lumen wrap: ffprobe failed: {error}", flush=True)
-        return {}
+    except json.JSONDecodeError as error:
+        err = (proc.stderr or "").strip()
+        raise RuntimeError(err or str(error)) from error
+    stream = (data.get("streams") or [{}])[0]
+    fmt = data.get("format") or {}
+    rate = None
+    if isinstance(stream, dict):
+        rate = stream.get("r_frame_rate") or stream.get("avg_frame_rate")
+    fps = _fps_from_rate(rate if isinstance(rate, str) else None)
+    info: dict[str, Any] = {
+        "width": stream.get("width") if isinstance(stream, dict) else None,
+        "height": stream.get("height") if isinstance(stream, dict) else None,
+        "fps": fps,
+        "frame_rate": rate,
+        "frames": stream.get("nb_frames") if isinstance(stream, dict) else None,
+        "duration": fmt.get("duration") if isinstance(fmt, dict) else None,
+        "size": fmt.get("size") if isinstance(fmt, dict) else None,
+    }
+    return {key: value for key, value in info.items() if value not in (None, "")}
 
 
 def attach_local_output(output: Any, job_input: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -297,10 +329,18 @@ def prepare_rife_source(job_input: dict[str, Any] | None) -> PreparedRifeSource 
         vf_rot = transpose_filter(rotation)
         if vf_rot:
             baked = os.path.join(work_dir, "source-upright.mp4")
-            _ffmpeg_filters(source, baked, vf_rot)
-            print(f"Lumen wrap: baked source rotation {rotation} deg before RIFE", flush=True)
-            source = baked
-            rotation = 0
+            try:
+                _encode_video_only(source, baked, vf_rot)
+                print(f"Lumen wrap: baked source rotation {rotation} deg before RIFE", flush=True)
+                source = baked
+                rotation = 0
+            except Exception as error:
+                print(
+                    f"Lumen wrap: rotation bake failed ({error}); using the coded orientation",
+                    flush=True,
+                )
+                if os.path.isfile(baked):
+                    os.unlink(baked)
 
         probe = probe_video(source)
         work_input = dict(job_input)
@@ -572,7 +612,7 @@ def _ffmpeg_select(src: str, dest: str, vf: str, fps: float | None) -> None:
         "-i",
         src,
         "-vf",
-        vf,
+        _with_even_frames(vf),
         "-an",
         "-c:v",
         "libx264",
@@ -601,7 +641,14 @@ def _conformed_path(path: str, fps: float | None, rotation: int) -> str:
     return os.path.join(directory or tempfile.gettempdir(), f"{stem}-{suffix}{ext or '.mp4'}")
 
 
+def _with_even_frames(vf: str) -> str:
+    if EVEN_SCALE in vf:
+        return vf
+    return f"{vf},{EVEN_SCALE}" if vf else EVEN_SCALE
+
+
 def _ffmpeg_filters(src: str, dest: str, vf: str) -> None:
+    graph = _with_even_frames(vf)
     common = [
         "ffmpeg",
         "-y",
@@ -616,7 +663,7 @@ def _ffmpeg_filters(src: str, dest: str, vf: str) -> None:
         "-map",
         "0:a:0?",
         "-vf",
-        vf,
+        graph,
         "-metadata:s:v:0",
         "rotate=0",
         "-c:v",
@@ -632,10 +679,65 @@ def _ffmpeg_filters(src: str, dest: str, vf: str) -> None:
     ]
     try:
         subprocess.check_call(common + ["-c:a", "copy", dest], timeout=3600)
-        return
+        if probe_video(dest).get("width"):
+            return
     except (subprocess.CalledProcessError, FileNotFoundError):
         pass
+    if os.path.isfile(dest):
+        os.unlink(dest)
     subprocess.check_call(common + ["-c:a", "aac", "-b:a", "192k", dest], timeout=3600)
+    if not probe_video(dest).get("width"):
+        raise RuntimeError(f"ffmpeg wrote an unreadable mp4: {dest}")
+
+
+def _encode_video_only(src: str, dest: str, vf: str) -> None:
+    """Working copy for RIFE/SeedVR2. Audio is muxed back from the original later."""
+    if os.path.isfile(dest):
+        os.unlink(dest)
+    graph = _with_even_frames(vf)
+    attempts = (["-movflags", "+faststart"], [])
+    last_error: Exception | None = None
+    for extra in attempts:
+        command = [
+            "ffmpeg",
+            "-y",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-noautorotate",
+            "-i",
+            src,
+            "-an",
+            "-vf",
+            graph,
+            "-metadata:s:v:0",
+            "rotate=0",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "fast",
+            "-crf",
+            "16",
+            "-pix_fmt",
+            "yuv420p",
+            *extra,
+            dest,
+        ]
+        try:
+            proc = subprocess.run(command, capture_output=True, text=True, timeout=3600)
+            if proc.returncode != 0:
+                err = (proc.stderr or proc.stdout or f"ffmpeg exit {proc.returncode}").strip()
+                raise RuntimeError(err)
+            if probe_video(dest).get("width"):
+                return
+            last_error = RuntimeError(f"unreadable output {dest}")
+        except Exception as error:
+            last_error = error
+            print(f"Lumen wrap: ffmpeg encode failed: {error}", flush=True)
+        if os.path.isfile(dest):
+            os.unlink(dest)
+    if last_error:
+        raise last_error
 
 
 def _fps_from_rate(rate: str | None) -> float | None:

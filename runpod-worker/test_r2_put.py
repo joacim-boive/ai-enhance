@@ -1,10 +1,14 @@
+import json
 import os
 import shutil
 import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from r2_put import (
+    EVEN_SCALE,
+    _with_even_frames,
     attach_local_output,
     conform_output_fps,
     conform_output_rotation,
@@ -334,6 +338,70 @@ class R2PutTests(unittest.TestCase):
                 os.unlink(src)
             if prepared is not None:
                 shutil.rmtree(prepared.work_dir, ignore_errors=True)
+
+    def test_with_even_frames_appends_scale(self) -> None:
+        self.assertEqual(_with_even_frames(""), EVEN_SCALE)
+        self.assertEqual(_with_even_frames("transpose=1"), f"transpose=1,{EVEN_SCALE}")
+        self.assertEqual(_with_even_frames(EVEN_SCALE), EVEN_SCALE)
+
+    def test_probe_video_returns_empty_on_unreadable_file(self) -> None:
+        handle = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False)
+        try:
+            handle.write(b"not a video")
+            handle.close()
+            self.assertEqual(probe_video(handle.name), {})
+        finally:
+            os.unlink(handle.name)
+
+    def test_probe_video_parses_json_when_ffprobe_exits_nonzero(self) -> None:
+        payload = json.dumps(
+            {
+                "streams": [
+                    {
+                        "width": 1080,
+                        "height": 1920,
+                        "r_frame_rate": "24/1",
+                        "nb_frames": "48",
+                    }
+                ],
+                "format": {"duration": "2.000000", "size": "1234"},
+            }
+        )
+
+        def fake_run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+            return subprocess.CompletedProcess(command, 1, stdout=payload, stderr="side data")
+
+        with patch("r2_put.subprocess.run", side_effect=fake_run):
+            probe = probe_video("/tmp/source-upright.mp4")
+        self.assertEqual(probe.get("width"), 1080)
+        self.assertEqual(probe.get("height"), 1920)
+        self.assertEqual(probe.get("fps"), 24.0)
+
+    def test_probe_video_falls_back_when_side_data_query_fails(self) -> None:
+        payload = json.dumps(
+            {
+                "streams": [
+                    {
+                        "width": 16,
+                        "height": 32,
+                        "r_frame_rate": "24/1",
+                        "nb_frames": "8",
+                    }
+                ],
+                "format": {"duration": "0.333000", "size": "900"},
+            }
+        )
+
+        def fake_run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+            if "stream_side_data" in command:
+                return subprocess.CompletedProcess(command, 1, stdout="", stderr="Invalid argument")
+            return subprocess.CompletedProcess(command, 0, stdout=payload, stderr="")
+
+        with patch("r2_put.subprocess.run", side_effect=fake_run):
+            probe = probe_video("/tmp/source-upright.mp4")
+        self.assertEqual(probe.get("width"), 16)
+        self.assertEqual(probe.get("height"), 32)
+        self.assertEqual(probe.get("frames"), "8")
 
 
 if __name__ == "__main__":
