@@ -27,7 +27,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)) or "/")
 
 import runpod.serverless as serverless
 
-from progress import comfy_progress_percent
+from progress import comfy_progress_percent, hold_progress
 from r2_put import (
     PreparedRifeSource,
     _find_video_path,
@@ -49,6 +49,7 @@ _real_start = serverless.start
 HUB_HANDLER = os.environ.get("LUMEN_HUB_HANDLER", "/hub_handler.py")
 _job_input: ContextVar[dict[str, Any]] = ContextVar("lumen_job_input", default={})
 _current_job: ContextVar[Any] = ContextVar("lumen_job", default=None)
+_progress_high: ContextVar[int] = ContextVar("lumen_progress_high", default=0)
 
 
 def _current_input() -> dict[str, Any]:
@@ -60,8 +61,10 @@ def _progress(percent: int, stage: str, detail: str = "") -> None:
     job = _current_job.get()
     if not job:
         return
+    held = hold_progress(_progress_high.get(), percent)
+    _progress_high.set(held)
     payload = {
-        "percent": max(0, min(99, int(percent))),
+        "percent": held,
         "stage": stage,
         "detail": detail,
     }
@@ -255,6 +258,7 @@ def _patched_start(config):
         payload = job.get("input") if isinstance(job, dict) else {}
         working = payload if isinstance(payload, dict) else {}
         job_token = _current_job.set(job)
+        high_token = _progress_high.set(0)
         prepared = None
         input_token = None
         try:
@@ -276,6 +280,7 @@ def _patched_start(config):
             if prepared is not None:
                 shutil.rmtree(prepared.work_dir, ignore_errors=True)
             _current_job.reset(job_token)
+            _progress_high.reset(high_token)
             if input_token is not None:
                 _job_input.reset(input_token)
 

@@ -322,6 +322,15 @@ test("IN_PROGRESS progress comes from the worker payload, not a timer", () => {
   assert.ok(unknown.progress < 88);
 });
 
+test("parseGpuProgressOutput reads the latest snapshot from a list", () => {
+  const parsed = parseGpuProgressOutput([
+    { percent: 36, stage: "Enhancing on GPU", detail: "2/13 samples" },
+    { percent: 72, stage: "Enhancing on GPU", detail: "11/13 samples" },
+  ]);
+  assert.equal(parsed?.percent, 72);
+  assert.equal(parsed?.detail, "11/13 samples");
+});
+
 function emptyCounts() {
   return { idle: 0, running: 0, initializing: 0, throttled: 0, unhealthy: 0 };
 }

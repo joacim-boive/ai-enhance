@@ -9,6 +9,7 @@ import {
   listJobs,
   loadJob,
   patchJob,
+  upsertLiveEvent,
 } from "./jobs";
 import { jobOutputKey, mediaJobUrl } from "./keys";
 import { createVersionClipFromJob, loadClip } from "./clips";
@@ -412,22 +413,23 @@ async function runGpu(
     signal.addEventListener("abort", onAbort, { once: true });
     const output = await pollGpuJob(runpodJobId, signal, {
       onWait: async (update) => {
-        await patchJob(job.id, {
-          status: update.runpodStatus === "IN_PROGRESS" ? "processing" : "warming",
-          stage: update.stage,
-          progress: update.progress,
-        });
         const eventKey = `${update.stage}|${update.level}|${update.message}|${Math.floor(update.progress / 5)}`;
         if (eventKey === lastEventKey) {
           return;
         }
         lastEventKey = eventKey;
-        await appendEvent(job.id, {
-          stage: update.stage,
-          message: update.message,
-          progress: update.progress,
-          level: update.level,
-        });
+        await upsertLiveEvent(
+          job.id,
+          {
+            stage: update.stage,
+            message: update.message,
+            progress: update.progress,
+            level: update.level,
+          },
+          {
+            status: update.runpodStatus === "IN_PROGRESS" ? "processing" : "warming",
+          },
+        );
       },
     });
     signal.removeEventListener("abort", onAbort);

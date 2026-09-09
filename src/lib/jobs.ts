@@ -9,7 +9,8 @@ import {
 import { r2Enabled } from "./env";
 import { deleteObject, deletePrefix, getJsonObject, listObjectKeys, putJsonObject } from "./r2";
 import { deleteLocalPathname, listPathnames, readJson, saveJson } from "./storage";
-import type { Job, JobEvent, JobEventLevel, PublicJob } from "./types";
+import { monotonicProgress, upsertLiveProgressEvents } from "./live-progress";
+import type { Job, JobEvent, JobEventLevel, JobStatus, PublicJob } from "./types";
 
 const emitter = new EventEmitter();
 emitter.setMaxListeners(100);
@@ -162,6 +163,32 @@ export async function appendEvent(
     events,
     progress: event.progress,
     stage: event.stage,
+  });
+}
+
+export async function upsertLiveEvent(
+  id: string,
+  event: Omit<JobEvent, "id" | "ts"> & { ts?: number; id?: string },
+  extra?: { status?: JobStatus },
+): Promise<Job | null> {
+  const current = await loadJob(id);
+  if (!current) {
+    return null;
+  }
+  const progress = monotonicProgress(current.progress, event.progress);
+  const nextEvent: JobEvent = {
+    id: event.id ?? crypto.randomUUID(),
+    ts: event.ts ?? Date.now(),
+    stage: event.stage,
+    message: event.message,
+    progress,
+    level: event.level,
+  };
+  return patchJob(id, {
+    events: upsertLiveProgressEvents(current.events, nextEvent),
+    progress,
+    stage: event.stage,
+    ...(extra?.status ? { status: extra.status } : {}),
   });
 }
 

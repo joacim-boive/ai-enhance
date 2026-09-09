@@ -7,6 +7,7 @@ import { readJsonResponse } from "@/lib/http";
 import { DEFAULT_SETTINGS, treatmentLabel } from "@/lib/settings";
 import { playReviewChime } from "@/lib/chime";
 import { isActiveJobStatus, summarizeJobs } from "@/lib/queue-summary";
+import { mergeIncomingJob } from "@/lib/live-progress";
 import type {
   BenchSource,
   HealthStatus,
@@ -98,7 +99,7 @@ export function StudioApp() {
       setJobs((prev) => {
         const exists = prev.some((j) => j.id === updated.id);
         if (exists) {
-          return prev.map((j) => (j.id === updated.id ? updated : j));
+          return prev.map((j) => (j.id === updated.id ? mergeIncomingJob(j, updated) : j));
         }
         return [updated, ...prev];
       });

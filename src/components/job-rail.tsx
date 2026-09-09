@@ -2,6 +2,7 @@
 
 import { formatEta } from "@/lib/format";
 import { gpuShowsFleetBanner } from "@/lib/gpu-health";
+import { liveProcessingEvent } from "@/lib/live-progress";
 import { engineLabel } from "@/lib/settings";
 import type { HealthStatus, PublicJob } from "@/lib/types";
 
@@ -27,6 +28,7 @@ export function JobRail({ job, gpu = null, onCancel, onRetry }: Props) {
     job.status,
   );
   const showGpuFleet = Boolean(active && job.engine === "gpu" && gpu && gpuShowsFleetBanner(gpu));
+  const live = liveProcessingEvent(job.events);
   return (
     <section className="panel mt-6 rounded-[28px] p-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -88,25 +90,23 @@ export function JobRail({ job, gpu = null, onCancel, onRetry }: Props) {
         </p>
       ) : null}
 
-      <ol className="mt-6 grid gap-2 md:grid-cols-2">
-        {job.events.slice(-8).reverse().map((event) => (
-          <li
-            key={event.id}
-            className={`rounded-2xl border px-4 py-3 ${
-              event.level === "error"
-                ? "border-[rgba(224,122,106,0.35)] bg-[rgba(224,122,106,0.08)]"
-                : event.level === "warn"
-                  ? "border-[rgba(232,195,106,0.3)] bg-[rgba(232,195,106,0.08)]"
-                  : "border-[var(--line)] bg-black/20"
-            }`}
-          >
-            <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-[var(--muted)]">
-              {event.stage} · {event.level}
-            </p>
-            <p className="mt-1 text-sm">{event.message}</p>
-          </li>
-        ))}
-      </ol>
+      {live ? (
+        <p
+          role="status"
+          className={`mt-6 rounded-2xl border px-4 py-3 ${
+            live.level === "error"
+              ? "border-[rgba(224,122,106,0.35)] bg-[rgba(224,122,106,0.08)]"
+              : live.level === "warn"
+                ? "border-[rgba(232,195,106,0.3)] bg-[rgba(232,195,106,0.08)]"
+                : "border-[var(--line)] bg-black/20"
+          }`}
+        >
+          <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-[var(--muted)]">
+            {live.stage} · {live.level}
+          </span>
+          <span className="mt-1 block text-sm">{live.message}</span>
+        </p>
+      ) : null}
       <p className="mt-4 hidden text-[10px] uppercase tracking-[0.18em] text-[var(--muted)]">
         {STAGES.join(" → ")}
       </p>
